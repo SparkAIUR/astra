@@ -1,0 +1,118 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --all-targets
+
+      - name: Crates publish dry-run (dependency-aware)
+        run: |
+          set -euo pipefail
+          VERSION=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+          crate_exists() {
+            local pkg=$1
+            (cd /tmp && cargo info "${pkg}" 2>/dev/null | grep -q "version: ${VERSION}")
+          }
+
+          cargo publish -p astra-proto --dry-run
+          if crate_exists astra-proto; then
+            cargo publish -p astra-core --dry-run
+            cargo publish -p astractl --dry-run
+          fi
+          if crate_exists astra-core; then
+            cargo publish -p astrad --dry-run
+            cargo publish -p astra-forge --dry-run
+          fi
+
+  publish-images:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set tag
+        id: tag
+        run: echo "value=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push multi-arch images
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          tags: |
+            docker.io/halceon/astra:${{ steps.tag.outputs.value }}
+            docker.io/nudevco/astra:${{ steps.tag.outputs.value }}
+
+  publish-release:
+    needs: publish-images
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release notes preface
+        run: |
+          cat > /tmp/release-preface.md <<'NOTES'
+          ## Astra v${{ github.ref_name }}
+
+          This release publishes:
+          - Crates.io crates: `astra-proto`, `astra-core`, `astractl`, `astrad`, `astra-forge`
+          - Multi-arch images:
+            - `docker.io/halceon/astra:${{ github.ref_name }}`
+            - `docker.io/nudevco/astra:${{ github.ref_name }}`
+          - Latest public docs and deployment automation updates
+          NOTES
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release edit "${tag}" --notes-file /tmp/release-preface.md
+          else
+            gh release create "${tag}" \
+              --title "${tag}" \
+              --generate-notes \
+              --notes-file /tmp/release-preface.md
+          fi

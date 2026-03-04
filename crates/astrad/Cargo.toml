@@ -3,11 +3,17 @@ name = "astrad"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Astra server daemon exposing etcd-compatible APIs for control-plane workloads"
+repository = "https://github.com/SparkAIUR/astra"
+homepage = "https://github.com/SparkAIUR/astra"
+readme = "../../README.md"
+keywords = ["etcd", "raft", "kubernetes", "datastore", "astra"]
+categories = ["database-implementations", "network-programming"]
 
 [dependencies]
 anyhow.workspace = true
-astra-core = { path = "../astra-core" }
-astra-proto = { path = "../astra-proto" }
+astra-core = { version = "0.1.0", path = "../astra-core" }
+astra-proto = { version = "0.1.0", path = "../astra-proto" }
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
 clap.workspace = true

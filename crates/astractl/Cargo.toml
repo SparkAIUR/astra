@@ -3,10 +3,16 @@ name = "astractl"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Command-line client for interacting with Astra and etcd-compatible endpoints"
+repository = "https://github.com/SparkAIUR/astra"
+homepage = "https://github.com/SparkAIUR/astra"
+readme = "../../README.md"
+keywords = ["cli", "etcd", "kubernetes", "grpc", "astra"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 anyhow.workspace = true
-astra-proto = { path = "../astra-proto" }
+astra-proto = { version = "0.1.0", path = "../astra-proto" }
 clap.workspace = true
 futures.workspace = true
 serde_json.workspace = true

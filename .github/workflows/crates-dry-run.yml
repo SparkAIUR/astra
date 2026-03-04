@@ -1,0 +1,50 @@
+name: crates-dry-run
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Publish dry-run (ordered)
+        run: |
+          set -euo pipefail
+          VERSION=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+          crate_exists() {
+            local pkg=$1
+            (cd /tmp && cargo info "${pkg}" 2>/dev/null | grep -q "version: ${VERSION}")
+          }
+
+          echo "[crates-dry-run] astra-proto (publish dry-run)"
+          cargo publish -p astra-proto --dry-run
+
+          if crate_exists astra-proto; then
+            echo "[crates-dry-run] astra-core (publish dry-run)"
+            cargo publish -p astra-core --dry-run
+            echo "[crates-dry-run] astractl (publish dry-run)"
+            cargo publish -p astractl --dry-run
+          else
+            echo "[crates-dry-run] astra-proto not yet on crates.io; skipping dependent publish dry-runs"
+          fi
+
+          if crate_exists astra-core; then
+            echo "[crates-dry-run] astrad (publish dry-run)"
+            cargo publish -p astrad --dry-run
+            echo "[crates-dry-run] astra-forge (publish dry-run)"
+            cargo publish -p astra-forge --dry-run
+          else
+            echo "[crates-dry-run] astra-core not yet on crates.io; skipping remaining dependent publish dry-runs"
+          fi

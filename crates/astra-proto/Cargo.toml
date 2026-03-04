@@ -3,6 +3,12 @@ name = "astra-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "etcd-compatible protobuf/gRPC contract definitions used by Astra components"
+repository = "https://github.com/SparkAIUR/astra"
+homepage = "https://github.com/SparkAIUR/astra"
+readme = "../../README.md"
+keywords = ["etcd", "grpc", "protobuf", "kubernetes", "astra"]
+categories = ["api-bindings", "network-programming"]
 
 [dependencies]
 prost.workspace = true

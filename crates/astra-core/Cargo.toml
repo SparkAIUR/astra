@@ -3,10 +3,16 @@ name = "astra-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Core datastore engine, Raft state machine, and control-plane semantics for Astra"
+repository = "https://github.com/SparkAIUR/astra"
+homepage = "https://github.com/SparkAIUR/astra"
+readme = "../../README.md"
+keywords = ["etcd", "raft", "kubernetes", "control-plane", "astra"]
+categories = ["database-implementations"]
 
 [dependencies]
 anyhow.workspace = true
-astra-proto = { path = "../astra-proto" }
+astra-proto = { version = "0.1.0", path = "../astra-proto" }
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
 bincode.workspace = true
