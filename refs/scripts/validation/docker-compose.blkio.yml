@@ -1,0 +1,25 @@
+services:
+  astra-node1:
+    blkio_config:
+      device_write_iops:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: 150
+      device_write_bps:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: 10485760
+  astra-node2:
+    blkio_config:
+      device_write_iops:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: 150
+      device_write_bps:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: 10485760
+  astra-node3:
+    blkio_config:
+      device_write_iops:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: 150
+      device_write_bps:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: 10485760

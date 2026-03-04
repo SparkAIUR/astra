@@ -1,0 +1,201 @@
+name: phase6
+
+x-astra-env: &astra-env
+  ASTRAD_S3_ENDPOINT: http://minio:9000
+  ASTRAD_S3_BUCKET: astra-tier
+  ASTRAD_S3_REGION: us-east-1
+  ASTRAD_S3_PREFIX: astra
+  AWS_ACCESS_KEY_ID: minioadmin
+  AWS_SECRET_ACCESS_KEY: minioadmin
+  ASTRAD_MAX_MEMORY_MB: ${ASTRAD_MAX_MEMORY_MB:-256}
+  ASTRAD_DATA_DIR: /app/data
+  ASTRAD_RAFT_ADDR: 0.0.0.0:2380
+  ASTRAD_TIERING_INTERVAL_SECS: ${ASTRAD_TIERING_INTERVAL_SECS:-30}
+  ASTRAD_SST_TARGET_BYTES: ${ASTRAD_SST_TARGET_BYTES:-67108864}
+  ASTRAD_WAL_MAX_BATCH_REQUESTS: ${ASTRAD_WAL_MAX_BATCH_REQUESTS:-1000}
+  ASTRAD_WAL_BATCH_MAX_BYTES: ${ASTRAD_WAL_BATCH_MAX_BYTES:-8388608}
+  ASTRAD_WAL_MAX_LINGER_US: ${ASTRAD_WAL_MAX_LINGER_US:-2000}
+  ASTRAD_WAL_LOW_CONCURRENCY_THRESHOLD: ${ASTRAD_WAL_LOW_CONCURRENCY_THRESHOLD:-5}
+  ASTRAD_WAL_LOW_LINGER_US: ${ASTRAD_WAL_LOW_LINGER_US:-0}
+  ASTRAD_WAL_PENDING_LIMIT: ${ASTRAD_WAL_PENDING_LIMIT:-2000}
+  ASTRAD_WAL_SEGMENT_BYTES: ${ASTRAD_WAL_SEGMENT_BYTES:-67108864}
+  ASTRAD_WAL_IO_ENGINE: ${ASTRAD_WAL_IO_ENGINE:-auto}
+  ASTRAD_BG_IO_THROTTLE_ENABLED: ${ASTRAD_BG_IO_THROTTLE_ENABLED:-false}
+  ASTRAD_BG_IO_TOKENS_PER_SEC: ${ASTRAD_BG_IO_TOKENS_PER_SEC:-8192}
+  ASTRAD_BG_IO_BURST_TOKENS: ${ASTRAD_BG_IO_BURST_TOKENS:-16384}
+  ASTRAD_BG_IO_SQE_THROTTLE_ENABLED: ${ASTRAD_BG_IO_SQE_THROTTLE_ENABLED:-true}
+  ASTRAD_BG_IO_SQE_TOKENS_PER_SEC: ${ASTRAD_BG_IO_SQE_TOKENS_PER_SEC:-1024}
+  ASTRAD_BG_IO_SQE_BURST: ${ASTRAD_BG_IO_SQE_BURST:-2048}
+  ASTRAD_BG_IO_MIN_CHUNK_BYTES: ${ASTRAD_BG_IO_MIN_CHUNK_BYTES:-262144}
+  ASTRAD_BG_IO_MAX_CHUNK_BYTES: ${ASTRAD_BG_IO_MAX_CHUNK_BYTES:-262144}
+  ASTRAD_LSM_MAX_L0_FILES: ${ASTRAD_LSM_MAX_L0_FILES:-8}
+  ASTRAD_LSM_STALL_AT_FILES: ${ASTRAD_LSM_STALL_AT_FILES:-5}
+  ASTRAD_LSM_STALL_MAX_DELAY_MS: ${ASTRAD_LSM_STALL_MAX_DELAY_MS:-200}
+  ASTRAD_LSM_REJECT_AFTER_MS: ${ASTRAD_LSM_REJECT_AFTER_MS:-800}
+  ASTRAD_LSM_REJECT_EXTRA_FILES: ${ASTRAD_LSM_REJECT_EXTRA_FILES:-1}
+  ASTRAD_LSM_SYNTH_FILE_BYTES: ${ASTRAD_LSM_SYNTH_FILE_BYTES:-8388608}
+  ASTRAD_LSM_DELAY_BAND_L0_5_MS: ${ASTRAD_LSM_DELAY_BAND_L0_5_MS:-1}
+  ASTRAD_LSM_DELAY_BAND_L0_6_MS: ${ASTRAD_LSM_DELAY_BAND_L0_6_MS:-5}
+  ASTRAD_LSM_DELAY_BAND_L0_7_MS: ${ASTRAD_LSM_DELAY_BAND_L0_7_MS:-20}
+  ASTRAD_LIST_PREFIX_FILTER_ENABLED: ${ASTRAD_LIST_PREFIX_FILTER_ENABLED:-true}
+  ASTRAD_LIST_REVISION_FILTER_ENABLED: ${ASTRAD_LIST_REVISION_FILTER_ENABLED:-true}
+  ASTRAD_LIST_PREFETCH_ENABLED: ${ASTRAD_LIST_PREFETCH_ENABLED:-true}
+  ASTRAD_LIST_PREFETCH_PAGES: ${ASTRAD_LIST_PREFETCH_PAGES:-2}
+  ASTRAD_LIST_PREFETCH_CACHE_ENTRIES: ${ASTRAD_LIST_PREFETCH_CACHE_ENTRIES:-4096}
+  ASTRAD_READ_ISOLATION_ENABLED: ${ASTRAD_READ_ISOLATION_ENABLED:-true}
+  ASTRAD_GATEWAY_READ_TICKET_ENABLED: ${ASTRAD_GATEWAY_READ_TICKET_ENABLED:-false}
+  ASTRAD_GATEWAY_READ_TICKET_TTL_MS: ${ASTRAD_GATEWAY_READ_TICKET_TTL_MS:-20}
+  ASTRAD_GATEWAY_SINGLEFLIGHT_ENABLED: ${ASTRAD_GATEWAY_SINGLEFLIGHT_ENABLED:-false}
+  ASTRAD_GATEWAY_SINGLEFLIGHT_MAX_WAITERS: ${ASTRAD_GATEWAY_SINGLEFLIGHT_MAX_WAITERS:-4096}
+  ASTRAD_PUT_BATCH_MAX_REQUESTS: ${ASTRAD_PUT_BATCH_MAX_REQUESTS:-256}
+  ASTRAD_PUT_BATCH_MIN_REQUESTS: ${ASTRAD_PUT_BATCH_MIN_REQUESTS:-16}
+  ASTRAD_PUT_BATCH_MAX_LINGER_US: ${ASTRAD_PUT_BATCH_MAX_LINGER_US:-2000}
+  ASTRAD_PUT_BATCH_MIN_LINGER_US: ${ASTRAD_PUT_BATCH_MIN_LINGER_US:-50}
+  ASTRAD_PUT_BATCH_MAX_BYTES: ${ASTRAD_PUT_BATCH_MAX_BYTES:-262144}
+  ASTRAD_PUT_BATCH_PENDING_LIMIT: ${ASTRAD_PUT_BATCH_PENDING_LIMIT:-10000}
+  ASTRAD_PUT_ADAPTIVE_ENABLED: ${ASTRAD_PUT_ADAPTIVE_ENABLED:-true}
+  ASTRAD_PUT_ADAPTIVE_MODE: ${ASTRAD_PUT_ADAPTIVE_MODE:-queue_backlog_drain}
+  ASTRAD_PUT_TOKEN_LANE_ENABLED: ${ASTRAD_PUT_TOKEN_LANE_ENABLED:-true}
+  ASTRAD_PROFILE: ${ASTRAD_PROFILE:-auto}
+  ASTRAD_PROFILE_SAMPLE_SECS: ${ASTRAD_PROFILE_SAMPLE_SECS:-5}
+  ASTRAD_PROFILE_MIN_DWELL_SECS: ${ASTRAD_PROFILE_MIN_DWELL_SECS:-10}
+  ASTRAD_QOS_TIER0_PREFIXES: ${ASTRAD_QOS_TIER0_PREFIXES:-/registry/leases/,/omni/locks/}
+  ASTRAD_QOS_TIER0_SUFFIXES: ${ASTRAD_QOS_TIER0_SUFFIXES:-/leader,/lock}
+  ASTRAD_QOS_TIER0_MAX_BATCH_REQUESTS: ${ASTRAD_QOS_TIER0_MAX_BATCH_REQUESTS:-32}
+  ASTRAD_QOS_TIER0_MAX_LINGER_US: ${ASTRAD_QOS_TIER0_MAX_LINGER_US:-0}
+  ASTRAD_GRPC_MAX_CONCURRENT_STREAMS: ${ASTRAD_GRPC_MAX_CONCURRENT_STREAMS:-65535}
+  ASTRAD_GRPC_HTTP2_KEEPALIVE_INTERVAL_MS: ${ASTRAD_GRPC_HTTP2_KEEPALIVE_INTERVAL_MS:-15000}
+  ASTRAD_GRPC_HTTP2_KEEPALIVE_TIMEOUT_MS: ${ASTRAD_GRPC_HTTP2_KEEPALIVE_TIMEOUT_MS:-5000}
+  ASTRAD_GRPC_TCP_KEEPALIVE_MS: ${ASTRAD_GRPC_TCP_KEEPALIVE_MS:-30000}
+  ASTRAD_CHAOS_APPEND_ACK_DELAY_ENABLED: ${ASTRAD_CHAOS_APPEND_ACK_DELAY_ENABLED:-false}
+  ASTRAD_CHAOS_APPEND_ACK_DELAY_MIN_MS: ${ASTRAD_CHAOS_APPEND_ACK_DELAY_MIN_MS:-500}
+  ASTRAD_CHAOS_APPEND_ACK_DELAY_MAX_MS: ${ASTRAD_CHAOS_APPEND_ACK_DELAY_MAX_MS:-2000}
+  ASTRAD_CHAOS_APPEND_ACK_DELAY_NODE_ID: ${ASTRAD_CHAOS_APPEND_ACK_DELAY_NODE_ID:-0}
+  ASTRAD_METRICS_ENABLED: ${ASTRAD_METRICS_ENABLED:-true}
+  ASTRAD_METRICS_ADDR: ${ASTRAD_METRICS_ADDR:-0.0.0.0:9479}
+  ASTRAD_AUTH_ENABLED: ${ASTRAD_AUTH_ENABLED:-false}
+  ASTRAD_AUTH_JWT_HS256_SECRET: ${ASTRAD_AUTH_JWT_HS256_SECRET:-}
+  ASTRAD_AUTH_TENANT_CLAIM: ${ASTRAD_AUTH_TENANT_CLAIM:-tenant_id}
+  ASTRAD_TENANT_VIRTUALIZATION_ENABLED: ${ASTRAD_TENANT_VIRTUALIZATION_ENABLED:-false}
+
+x-astra-base: &astra-base
+  image: ${ASTRA_IMAGE:?set ASTRA_IMAGE}
+  environment: *astra-env
+  security_opt:
+    - seccomp:unconfined
+  ulimits:
+    nofile:
+      soft: ${ASTRA_NOFILE_SOFT:-262144}
+      hard: ${ASTRA_NOFILE_HARD:-262144}
+  mem_limit: ${PHASE6_ASTRA_MEM_LIMIT:-450m}
+  blkio_config:
+    device_write_iops:
+      - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+        rate: ${PHASE6_ASTRA_NODE_IOPS:-160}
+    device_write_bps:
+      - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+        rate: ${PHASE6_ASTRA_NODE_BPS:-10485760}
+  expose:
+    - "2380"
+
+services:
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    mem_limit: ${PHASE6_MINIO_MEM_LIMIT:-256m}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set m http://minio:9000 minioadmin minioadmin &&
+      mc mb m/astra-tier --ignore-existing
+      "
+
+  astra-node1:
+    <<: *astra-base
+    ports:
+      - "2379:2379"
+      - "19479:9479"
+    volumes:
+      - ${ASTRA_NODE1_DATA:-phase6-astra-node1-data}:/app/data
+    environment:
+      <<: *astra-env
+      ASTRAD_RAFT_ADVERTISE_ADDR: astra-node1:2380
+    command: ["--node-id=1", "--peers=http://astra-node1:2380,http://astra-node2:2380,http://astra-node3:2380"]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  astra-node2:
+    <<: *astra-base
+    ports:
+      - "32391:2379"
+      - "19480:9479"
+    volumes:
+      - ${ASTRA_NODE2_DATA:-phase6-astra-node2-data}:/app/data
+    environment:
+      <<: *astra-env
+      ASTRAD_RAFT_ADVERTISE_ADDR: astra-node2:2380
+    command: ["--node-id=2", "--peers=http://astra-node1:2380,http://astra-node2:2380,http://astra-node3:2380"]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  astra-node3:
+    <<: *astra-base
+    ports:
+      - "32392:2379"
+      - "19481:9479"
+    volumes:
+      - ${ASTRA_NODE3_DATA:-phase6-astra-node3-data}:/app/data
+    environment:
+      <<: *astra-env
+      ASTRAD_RAFT_ADVERTISE_ADDR: astra-node3:2380
+    command: ["--node-id=3", "--peers=http://astra-node1:2380,http://astra-node2:2380,http://astra-node3:2380"]
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  etcd:
+    image: quay.io/coreos/etcd:${PHASE6_ETCD_TAG:-v3.6.8}
+    mem_limit: ${PHASE6_ETCD_MEM_LIMIT:-1200m}
+    blkio_config:
+      device_write_iops:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: ${PHASE6_ETCD_IOPS:-500}
+      device_write_bps:
+        - path: ${ASTRA_BLKIO_DEVICE:-/dev/vda}
+          rate: ${PHASE6_ETCD_BPS:-20971520}
+    command: >
+      /usr/local/bin/etcd
+      --name phase6-etcd
+      --data-dir /etcd-data
+      --listen-client-urls http://0.0.0.0:2379
+      --advertise-client-urls http://127.0.0.1:2379
+      --listen-peer-urls http://0.0.0.0:2380
+      --initial-advertise-peer-urls http://127.0.0.1:2380
+      --initial-cluster phase6-etcd=http://127.0.0.1:2380
+      --initial-cluster-state new
+    volumes:
+      - ${PHASE6_ETCD_DATA:-phase6-etcd-data}:/etcd-data
+    ports:
+      - "22379:2379"
+      - "22380:2380"
+
+volumes:
+  phase6-astra-node1-data:
+  phase6-astra-node2-data:
+  phase6-astra-node3-data:
+  phase6-etcd-data:
