@@ -1,0 +1,92 @@
+version: 1
+
+includes:
+  - "**"
+
+excludes:
+  - ".git/**"
+  - ".pytest_cache/**"
+  - "target/**"
+  - "data/**"
+  - "docs/node_modules/**"
+  - "docs/.vitepress/dist/**"
+
+  # private operator memory and planning
+  - "AGENTS.md"
+  - "notes.md"
+  - "task_plan.md"
+  - "refs/base.md"
+
+  # private phase specs and reports
+  - "refs/build-spec-phase*.md"
+  - "refs/docs/**"
+
+  # private validation artifacts and local persistence
+  - "refs/scripts/validation/results/**"
+  - "refs/scripts/data/*.db"
+  - "refs/scripts/.venv/**"
+
+  # public docs should not expose internal history sections
+  - "docs/archive/**"
+  - "docs/labs/**"
+
+private_reference_patterns:
+  - "refs/build-spec-phase"
+  - "refs/docs/phase"
+  - "refs/docs/KB.md"
+  - "refs/docs/RULES.md"
+  - "refs/docs/STATE.yaml"
+  - "AGENTS.md"
+  - "notes.md"
+  - "task_plan.md"
+  - "refs/scripts/validation/results/"
+
+text_rewrites:
+  - pattern: "halceon/astra"
+    replacement: "halceon/astra"
+
+commit_buckets:
+  bootstrap:
+    message: "bootstrap: initialize public repository metadata"
+    includes:
+      - ".gitattributes"
+      - ".gitignore"
+      - "README.md"
+      - "LICENSE"
+      - "SECURITY.md"
+      - "CONTRIBUTING.md"
+      - "CODE_OF_CONDUCT.md"
+      - "NOTICE"
+      - "pytest.ini"
+  workspace:
+    message: "core: add astra workspace and foundational runtime crates"
+    includes:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+  containers:
+    message: "ops: add containerization and local sandbox stack"
+    includes:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker-compose.yaml"
+      - "docker-compose.blkio.yml"
+      - "quickstart.sh"
+      - "refs/sandbox/**"
+  scripts:
+    message: "test: add validation harness scripts"
+    includes:
+      - "refs/scripts/**"
+      - "Makefile"
+    excludes:
+      - "refs/scripts/public/**"
+  docs:
+    message: "docs: add public docs set"
+    includes:
+      - "docs/**"
+  ci:
+    message: "ci: add workflows and release automation"
+    includes:
+      - ".github/**"
+      - "refs/scripts/release/**"
+      - "refs/scripts/public/**"
