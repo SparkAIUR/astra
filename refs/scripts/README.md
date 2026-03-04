@@ -29,11 +29,11 @@ REPORT=phase4 make report-msg
 
 # 1) Compact noisy logs (drops DEBUG by default, strips timestamps, compacts repeats)
 uv run --project refs/scripts python refs/scripts/validation/compact_log.py \
-  refs/scripts/validation/results/phase4-scenario-b-astra-logs.txt
+  <validation-log.txt>
 
 # 2) Build report message markdown with inlined referenced files
 uv run --project refs/scripts python refs/scripts/validation/build_validation_report_msg.py \
-  refs/docs/phase4-validation-report.md \
+  <report.md> \
   --repo-root . \
   --clean-referenced-logs
 ```

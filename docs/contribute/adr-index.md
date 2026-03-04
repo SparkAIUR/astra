@@ -13,7 +13,7 @@ related_artifacts: []
 
 Formal ADR pages are not yet split into a dedicated directory. Until then:
 
-- Use `refs/docs/KB.md` for durable decision capture.
-- Use `AGENTS.md` and phase integration plans for directional architecture context.
+- Use pull requests and issue discussions for durable decision capture.
+- Keep architecture rationale close to implementation docs under `docs/internals/*`.
 
 When ADR volume grows, introduce `docs/adr/ADR-XXXX-*.md` and link here.

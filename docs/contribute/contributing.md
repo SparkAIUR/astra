@@ -17,7 +17,7 @@ related_artifacts:
 - Keep changes atomic and scoped.
 - Update docs for behavior, API, or config changes.
 - Preserve validation artifact reproducibility.
-- Record durable learnings in `refs/docs/KB.md` and state transitions in `refs/docs/STATE.yaml`.
+- Record durable learnings in PR descriptions, issues, and ADR-style notes under `docs/`.
 
 ## Contribution Areas
 
