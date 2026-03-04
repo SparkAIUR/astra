@@ -1,0 +1,21 @@
+services:
+  minio:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:19000:9000"
+      - "127.0.0.1:19001:9001"
+
+  astra-node1:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:52379:2379"
+
+  astra-node2:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:52391:2379"
+
+  astra-node3:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:52392:2379"

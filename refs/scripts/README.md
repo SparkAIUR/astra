@@ -63,3 +63,23 @@ ASTRA_WORKSPACE=/root/astra-phase4 GHZ_VERSION=v0.121.0 \
 ssh root@host-ip "astra-env"
 ssh root@host-ip "astra-run 'cd \"\$ASTRA_REPO_DIR\" && docker compose version && ghz --version'"
 ```
+
+## Deployment Automation (Single Node K3s + Astra)
+```bash
+# Full remote orchestration from local machine:
+refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
+  --host root@host-ip \
+  -- \
+  --disk-device auto \
+  --validation smoke
+
+# Run directly on host:
+refs/scripts/deploy/deploy-k3s-single-node.sh \
+  --disk-device auto \
+  --validation smoke
+
+# Optional full readiness validation gate:
+refs/scripts/deploy/deploy-k3s-single-node.sh \
+  --disk-device auto \
+  --validation full
+```

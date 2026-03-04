@@ -3,10 +3,13 @@ title: Deploy Astra + K3s (Single Node and Cluster)
 summary: Run K3s with Astra as the external datastore on one host or across a production cluster.
 audience: operators
 status: canonical
-last_verified: 2026-03-03
+last_verified: 2026-03-04
 source_of_truth:
-  - refs/scripts/validation/phase6-common.sh
-  - docker-compose.yml
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - refs/scripts/deploy/deploy-k3s-single-node-remote.sh
+  - refs/scripts/validation/docker-compose.image.yml
+  - refs/scripts/validation/docker-compose.k3s-single-node.yml
+  - refs/scripts/validation/k3s-single-node-readiness.sh
 related_artifacts:
   - docs/guides/migration-k3s.md
   - docs/operations/deploy-production.md
@@ -16,7 +19,7 @@ related_artifacts:
 
 This guide shows two deployment patterns:
 
-- Single-node lab: Astra and K3s on the same host.
+- Single-node production profile: Astra and K3s on the same host with public ingress and dedicated local disk.
 - Cluster deployment: multi-node Astra backend with multi-node K3s control plane/workers.
 
 ## Prerequisites
@@ -27,23 +30,94 @@ This guide shows two deployment patterns:
   - `docker.io/halceon/astra:{tag}`
   - `docker.io/nudevco/astra:{tag}`
 
-## Topology A: Single-Node Lab
+## Automated Deployment (Recommended)
 
-### 1. Start Astra locally
-
-From repo root:
+### Local SSH orchestrator (single command from workstation)
 
 ```bash
-docker compose up -d minio minio-init astra-node1 astra-node2 astra-node3
+refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
+  --host root@<host-public-ip> \
+  -- \
+  --disk-device auto \
+  --validation smoke
 ```
+
+Run full readiness gate:
+
+```bash
+refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
+  --host root@<host-public-ip> \
+  -- \
+  --disk-device auto \
+  --validation full
+```
+
+### On-host deployment (run directly on VM)
+
+```bash
+cd /root/astra-lab/repo
+refs/scripts/deploy/deploy-k3s-single-node.sh \
+  --disk-device auto \
+  --validation smoke
+```
+
+Default behavior of the deploy scripts:
+
+- Remote script bootstraps the host, syncs `https://github.com/SparkAIUR/astra.git` on `main`, runs the on-host deploy, and pulls kubeconfig locally.
+- On-host deploy resolves the latest stable semver tag from `docker.io/halceon/astra` unless `--astra-image` or `--astra-tag` is provided.
+- Validation defaults to `smoke` (fast), with `--validation full` for the 720s readiness gate.
+- Disk setup is only executed when `--disk-device` is set (`auto` or explicit path).
+
+Machine-readable outputs:
+
+- `DEPLOY_SUMMARY_PATH=...`
+- `HOST_PUBLIC_IP=...`
+- `REMOTE_KUBECONFIG_PATH=...`
+- `VALIDATION_SUMMARY_PATH=...`
+
+## Topology A: Single-Node Production Profile (Manual Reference)
+
+### 1. Bootstrap host tools
+
+```bash
+refs/scripts/validation/bootstrap-ubuntu24-remote.sh root@<host-ip>
+ssh root@<host-ip> "astra-run 'cd \"\$ASTRA_REPO_DIR\" && refs/scripts/validation/bootstrap-phase6-host.sh'"
+```
+
+### 2. Prepare dedicated local storage disk for K3s PVCs
+
+If your storage disk is blank (example: `/dev/xvde1`):
+
+```bash
+mkfs.ext4 -F /dev/xvde1
+mkdir -p /var/lib/rancher/k3s/storage
+uuid=$(blkid -s UUID -o value /dev/xvde1)
+grep -q "${uuid}" /etc/fstab || echo "UUID=${uuid} /var/lib/rancher/k3s/storage ext4 defaults,nofail 0 2" >> /etc/fstab
+mount -a
+findmnt /var/lib/rancher/k3s/storage
+```
+
+### 3. Start Astra locally (single-node override)
+
+From repo root on the target host:
+
+```bash
+export ASTRA_IMAGE=docker.io/halceon/astra:v0.1.0
+docker compose \
+  -f refs/scripts/validation/docker-compose.image.yml \
+  -f refs/scripts/validation/docker-compose.k3s-single-node.yml \
+  up -d minio minio-init astra-node1 astra-node2 astra-node3
+```
+
+`docker-compose.k3s-single-node.yml` uses `ports: !override` so Astra/MinIO bind only to localhost; verify with `docker compose ... config` if you customize the profile.
 
 Check datastore health:
 
 ```bash
-etcdctl --endpoints=http://127.0.0.1:2379 endpoint status -w table
+etcdctl --endpoints=http://127.0.0.1:52379 endpoint status -w table
 ```
 
-### 2. Install/start K3s with Astra datastore endpoint
+### 4. Install/start K3s with Astra datastore endpoint, Traefik, and public IP
 
 Use Astra node client endpoints exposed by compose:
 
@@ -51,13 +125,14 @@ Use Astra node client endpoints exposed by compose:
 curl -sfL https://get.k3s.io | \
   INSTALL_K3S_EXEC="server \
     --write-kubeconfig-mode 644 \
-    --disable traefik \
-    --disable servicelb \
-    --datastore-endpoint 'http://127.0.0.1:2379,http://127.0.0.1:32391,http://127.0.0.1:32392'" \
+    --node-external-ip <host-public-ip> \
+    --tls-san <host-public-ip> \
+    --default-local-storage-path /var/lib/rancher/k3s/storage \
+    --datastore-endpoint 'http://127.0.0.1:52379,http://127.0.0.1:52391,http://127.0.0.1:52392'" \
   sh -
 ```
 
-### 3. Validate cluster + datastore path
+### 5. Validate cluster + datastore path
 
 ```bash
 kubectl get nodes
@@ -69,7 +144,76 @@ kubectl -n astra-k3s-smoke get configmap smoke -o yaml
 Optional direct datastore probe:
 
 ```bash
-etcdctl --endpoints=http://127.0.0.1:2379 get /registry/configmaps/astra-k3s-smoke/smoke --prefix --keys-only
+etcdctl --endpoints=http://127.0.0.1:52379 get /registry/configmaps/astra-k3s-smoke/smoke --prefix --keys-only
+```
+
+### 6. Validate Traefik and local-path storage
+
+Create ingress + PVC smoke workload:
+
+```bash
+kubectl -n astra-k3s-smoke apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: whoami }
+  template:
+    metadata:
+      labels: { app: whoami }
+    spec:
+      containers:
+      - name: whoami
+        image: traefik/whoami:v1.10.3
+        ports: [{containerPort: 80}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+spec:
+  selector: { app: whoami }
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: whoami
+spec:
+  ingressClassName: traefik
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: whoami
+            port:
+              number: 80
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: smoke-pvc
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+```
+
+Probe ingress from outside the host:
+
+```bash
+curl -fsS http://<host-public-ip>/
 ```
 
 ## Topology B: Cluster Deployment
@@ -139,6 +283,33 @@ curl -sfL https://get.k3s.io | \
 - Keep Astra profile/tuning explicit (`ASTRAD_PROFILE`, queue/quorum budgets) and track with Prometheus/Grafana.
 - Revalidate with the phase harness when changing datastore tuning:
   - `refs/scripts/validation/phase6-k3s-benchmark.sh`
+
+## Readiness Stress and Cleanup (Single Node)
+
+Use the bundled stress harness:
+
+```bash
+export INGRESS_URL="http://<host-public-ip>/astra-ready"
+refs/scripts/validation/k3s-single-node-readiness.sh
+```
+
+Outputs:
+
+- `${ASTRA_RESULTS_DIR}/single-node-readiness-<timestamp>/single-node-readiness-summary.json`
+- `${ASTRA_RESULTS_DIR}/single-node-readiness-<timestamp>/`
+
+Default behavior deletes the stress namespace at end. Set `KEEP_RESOURCES=true` to retain.
+
+## Kubeconfig Export (Local Workstation)
+
+Copy remote kubeconfig and rewrite server address:
+
+```bash
+mkdir -p ~/.kube
+scp root@<host-public-ip>:/etc/rancher/k3s/k3s.yaml ~/.kube/astra-k3s-<host-public-ip>.yaml
+sed -i.bak "s#https://127.0.0.1:6443#https://<host-public-ip>:6443#g" ~/.kube/astra-k3s-<host-public-ip>.yaml
+KUBECONFIG=~/.kube/astra-k3s-<host-public-ip>.yaml kubectl get nodes
+```
 
 ## Rollback
 
