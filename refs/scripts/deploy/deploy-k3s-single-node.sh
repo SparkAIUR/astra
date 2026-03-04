@@ -18,6 +18,9 @@ Options:
   --resolve-latest-stable <bool> Resolve latest stable semver tag from Docker Hub (default: true)
   --k3s-version <version>        Optional k3s version pin (default: latest from get.k3s.io)
   --host-public-ip <ip>          Public IP for K3s TLS SAN / Traefik ingress (default: auto-detect)
+  --tls-san <value>              Additional K3s API TLS SAN (repeatable; default: host public IP)
+  --node-name <name>             Explicit K3s node name
+  --kubelet-arg <arg>            Additional k3s --kubelet-arg value (repeatable)
   --disk-device <path|auto>      Disk device to prepare/mount; omit to skip disk setup
   --disk-mount <path>            K3s local storage mount path (default: /var/lib/rancher/k3s/storage)
   --validation <none|smoke|full> Post-deploy validation mode (default: smoke)
@@ -35,6 +38,7 @@ Options:
 Examples:
   deploy-k3s-single-node.sh --disk-device auto --validation full
   deploy-k3s-single-node.sh --astra-tag v0.1.0 --host-public-ip 162.209.124.74 --validation smoke
+  deploy-k3s-single-node.sh --host-public-ip 192.168.148.190 --tls-san 100.110.236.66 --node-name hplcpc01 --kubelet-arg fail-swap-on=false
 USAGE
 }
 
@@ -44,6 +48,9 @@ ASTRA_TAG=""
 RESOLVE_LATEST_STABLE=${RESOLVE_LATEST_STABLE:-true}
 K3S_VERSION=${K3S_VERSION:-}
 HOST_PUBLIC_IP=${HOST_PUBLIC_IP:-}
+NODE_NAME=${NODE_NAME:-}
+TLS_SANS=()
+KUBELET_ARGS=()
 DISK_DEVICE=${DISK_DEVICE:-}
 DISK_MOUNT=${DISK_MOUNT:-/var/lib/rancher/k3s/storage}
 VALIDATION_MODE=${VALIDATION_MODE:-smoke}
@@ -66,6 +73,9 @@ while [ "$#" -gt 0 ]; do
     --resolve-latest-stable) RESOLVE_LATEST_STABLE=${2:?missing value for --resolve-latest-stable}; shift 2 ;;
     --k3s-version) K3S_VERSION=${2:?missing value for --k3s-version}; shift 2 ;;
     --host-public-ip) HOST_PUBLIC_IP=${2:?missing value for --host-public-ip}; shift 2 ;;
+    --tls-san) TLS_SANS+=("${2:?missing value for --tls-san}"); shift 2 ;;
+    --node-name) NODE_NAME=${2:?missing value for --node-name}; shift 2 ;;
+    --kubelet-arg) KUBELET_ARGS+=("${2:?missing value for --kubelet-arg}"); shift 2 ;;
     --disk-device) DISK_DEVICE=${2:?missing value for --disk-device}; shift 2 ;;
     --disk-mount) DISK_MOUNT=${2:?missing value for --disk-mount}; shift 2 ;;
     --validation) VALIDATION_MODE=${2:?missing value for --validation}; shift 2 ;;
@@ -123,6 +133,7 @@ FAILURE_MESSAGE=""
 ASTRA_IMAGE_RESOLVED=""
 ASTRA_TAG_RESOLVED=""
 HOST_PUBLIC_IP_RESOLVED=""
+TLS_SANS_RESOLVED=()
 DISK_DEVICE_RESOLVED=""
 DISK_SETUP_PERFORMED=false
 DATASTORE_ENDPOINTS="http://127.0.0.1:52379,http://127.0.0.1:52391,http://127.0.0.1:52392"
@@ -144,11 +155,38 @@ fail_deploy() {
   exit 1
 }
 
+check_datastore_ready() {
+  local key="/astra/deploy/readiness/${DEPLOY_RUN_ID}"
+  local endpoints=()
+  local endpoint=""
+
+  # Preferred path for environments that expose etcd maintenance RPCs.
+  if etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${DATASTORE_ENDPOINTS}" endpoint status -w json >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # Some Astra profiles omit maintenance RPCs; fall back to direct KV probes.
+  IFS=',' read -r -a endpoints <<< "${DATASTORE_ENDPOINTS}"
+  for endpoint in "${endpoints[@]-}"; do
+    [ -n "${endpoint}" ] || continue
+    if ! etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${endpoint}" put "${key}" "${DEPLOY_RUN_ID}" >/dev/null 2>&1; then
+      return 1
+    fi
+    if ! etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${endpoint}" get "${key}" >/dev/null 2>&1; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
 write_summary() {
   local exit_code=${1:-1}
   local node_total=0
   local node_ready=0
   local kube_system_unhealthy=0
+  local tls_sans_json
+  local kubelet_args_json
 
   if command -v k3s >/dev/null 2>&1; then
     K3S_VERSION_INSTALLED=$(k3s --version 2>/dev/null | head -n 1 || true)
@@ -171,13 +209,17 @@ write_summary() {
     ) > "${COMPOSE_PS_PATH}" 2>&1 || true
   fi
 
+  tls_sans_json=$(printf '%s\n' "${TLS_SANS_RESOLVED[@]-}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')
+  kubelet_args_json=$(printf '%s\n' "${KUBELET_ARGS[@]-}" | python3 -c 'import json,sys; print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))')
+
   python3 - <<'PY' "${DEPLOY_SUMMARY_PATH}" "${DEPLOY_RUN_ID}" "${exit_code}" "${DEPLOY_STATUS}" \
     "${FAILURE_STEP}" "${FAILURE_MESSAGE}" "${ASTRA_IMAGE_RESOLVED}" "${ASTRA_TAG_RESOLVED}" \
     "${ASTRA_REPO}" "${HOST_PUBLIC_IP_RESOLVED}" "${DISK_DEVICE}" "${DISK_DEVICE_RESOLVED}" \
     "${DISK_MOUNT}" "${DISK_SETUP_PERFORMED}" "${DATASTORE_ENDPOINTS}" "${VALIDATION_MODE}" \
     "${READINESS_DURATION}" "${VALIDATION_STATUS}" "${VALIDATION_SUMMARY_PATH}" "${K3S_VERSION}" \
     "${K3S_VERSION_INSTALLED}" "${REPO_DIR}" "${RESULTS_DIR}" "${DEPLOY_LOG_PATH}" \
-    "${COMPOSE_PS_PATH}" "${node_total}" "${node_ready}" "${kube_system_unhealthy}"
+    "${COMPOSE_PS_PATH}" "${node_total}" "${node_ready}" "${kube_system_unhealthy}" \
+    "${NODE_NAME}" "${tls_sans_json}" "${kubelet_args_json}"
 import json
 import pathlib
 import sys
@@ -211,6 +253,9 @@ import sys
     node_total,
     node_ready,
     kube_system_unhealthy,
+    node_name,
+    tls_sans_json,
+    kubelet_args_json,
 ) = sys.argv[1:]
 
 summary = {
@@ -230,10 +275,13 @@ summary = {
     "k3s": {
         "requested_version": k3s_version_requested,
         "installed_version": k3s_version_installed,
+        "node_name": node_name,
+        "kubelet_args": json.loads(kubelet_args_json),
         "kubeconfig_path": "/etc/rancher/k3s/k3s.yaml",
     },
     "network": {
         "host_public_ip": host_public_ip,
+        "tls_sans": json.loads(tls_sans_json),
     },
     "disk": {
         "requested": disk_device_requested,
@@ -331,6 +379,23 @@ if [ -z "${HOST_PUBLIC_IP_RESOLVED}" ]; then
   fail_deploy "network" "failed to resolve host public ip; set --host-public-ip"
 fi
 
+if [ "${#TLS_SANS[@]}" -eq 0 ]; then
+  TLS_SANS_RESOLVED=("${HOST_PUBLIC_IP_RESOLVED}")
+else
+  for san in "${TLS_SANS[@]}"; do
+    local_seen=false
+    for existing in "${TLS_SANS_RESOLVED[@]-}"; do
+      if [ "${existing}" = "${san}" ]; then
+        local_seen=true
+        break
+      fi
+    done
+    if [ "${local_seen}" = "false" ]; then
+      TLS_SANS_RESOLVED+=("${san}")
+    fi
+  done
+fi
+
 if [ -n "${ASTRA_IMAGE}" ]; then
   ASTRA_IMAGE_RESOLVED=${ASTRA_IMAGE}
 elif [ -n "${ASTRA_TAG}" ]; then
@@ -396,7 +461,7 @@ fi
 
 if ! astra_bool_true "${DRY_RUN}"; then
   astra_log "waiting for datastore endpoints"
-  astra_retry 120 2 etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${DATASTORE_ENDPOINTS}" endpoint status -w json >/dev/null \
+  astra_retry 120 2 check_datastore_ready \
     || fail_deploy "datastore" "astra endpoints did not become ready"
 
   etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${DATASTORE_ENDPOINTS}" \
@@ -410,7 +475,17 @@ else
   astra_log "installing/upgrading k3s to latest"
 fi
 
-install_exec="server --write-kubeconfig-mode 644 --node-external-ip ${HOST_PUBLIC_IP_RESOLVED} --tls-san ${HOST_PUBLIC_IP_RESOLVED} --default-local-storage-path ${DISK_MOUNT} --datastore-endpoint '${DATASTORE_ENDPOINTS}'"
+install_exec="server --write-kubeconfig-mode 644 --node-external-ip ${HOST_PUBLIC_IP_RESOLVED}"
+for san in "${TLS_SANS_RESOLVED[@]-}"; do
+  install_exec+=" --tls-san ${san}"
+done
+if [ -n "${NODE_NAME}" ]; then
+  install_exec+=" --node-name ${NODE_NAME}"
+fi
+for kubelet_arg in "${KUBELET_ARGS[@]-}"; do
+  install_exec+=" --kubelet-arg ${kubelet_arg}"
+done
+install_exec+=" --default-local-storage-path ${DISK_MOUNT} --datastore-endpoint '${DATASTORE_ENDPOINTS}'"
 if [ -n "${K3S_VERSION}" ]; then
   k3s_install_cmd="curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=$(q "${K3S_VERSION}") INSTALL_K3S_EXEC=$(q "${install_exec}") sh -"
 else

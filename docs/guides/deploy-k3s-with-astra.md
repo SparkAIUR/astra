@@ -37,6 +37,8 @@ This guide shows two deployment patterns:
 ```bash
 refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
   --host root@<host-public-ip> \
+  --cluster-name <cluster-name> \
+  --kubeconfig-server-ip <host-public-ip> \
   -- \
   --disk-device auto \
   --validation smoke
@@ -47,6 +49,9 @@ Run full readiness gate:
 ```bash
 refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
   --host root@<host-public-ip> \
+  --cluster-name <cluster-name> \
+  --kubeconfig-server-ip <host-public-ip> \
+  --kubeconfig-server-ip <host-secondary-ip> \
   -- \
   --disk-device auto \
   --validation full
@@ -58,12 +63,17 @@ refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
 cd /root/astra-lab/repo
 refs/scripts/deploy/deploy-k3s-single-node.sh \
   --disk-device auto \
+  --node-name <cluster-name> \
+  --tls-san <host-public-ip> \
+  --tls-san <host-secondary-ip> \
+  --kubelet-arg fail-swap-on=false \
   --validation smoke
 ```
 
 Default behavior of the deploy scripts:
 
 - Remote script bootstraps the host, syncs `https://github.com/SparkAIUR/astra.git` on `main`, runs the on-host deploy, and pulls kubeconfig locally.
+- Remote script can generate multiple local kubeconfigs with `--kubeconfig-server-ip` (for dual access via tailscale + LAN) and can rename kubeconfig cluster/context/user names with `--cluster-name`.
 - On-host deploy resolves the latest stable semver tag from `docker.io/halceon/astra` unless `--astra-image` or `--astra-tag` is provided.
 - Validation defaults to `smoke` (fast), with `--validation full` for the 720s readiness gate.
 - Disk setup is only executed when `--disk-device` is set (`auto` or explicit path).
@@ -74,6 +84,7 @@ Machine-readable outputs:
 - `HOST_PUBLIC_IP=...`
 - `REMOTE_KUBECONFIG_PATH=...`
 - `VALIDATION_SUMMARY_PATH=...`
+- `LOCAL_KUBECONFIG_PATHS=...` (comma-separated when multiple kubeconfigs are generated)
 
 ## Topology A: Single-Node Production Profile (Manual Reference)
 
@@ -96,6 +107,8 @@ grep -q "${uuid}" /etc/fstab || echo "UUID=${uuid} /var/lib/rancher/k3s/storage 
 mount -a
 findmnt /var/lib/rancher/k3s/storage
 ```
+
+If your storage partition already has an ext4 filesystem (for example `/dev/nvme0n1p4`), you can skip `mkfs` and just mount + persist it in `/etc/fstab`.
 
 ### 3. Start Astra locally (single-node override)
 
@@ -127,6 +140,9 @@ curl -sfL https://get.k3s.io | \
     --write-kubeconfig-mode 644 \
     --node-external-ip <host-public-ip> \
     --tls-san <host-public-ip> \
+    --tls-san <host-secondary-ip> \
+    --node-name <cluster-name> \
+    --kubelet-arg fail-swap-on=false \
     --default-local-storage-path /var/lib/rancher/k3s/storage \
     --datastore-endpoint 'http://127.0.0.1:52379,http://127.0.0.1:52391,http://127.0.0.1:52392'" \
   sh -

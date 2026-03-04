@@ -23,6 +23,8 @@ Options:
   --pull-kubeconfig              Copy kubeconfig to local machine (default)
   --no-pull-kubeconfig           Do not copy kubeconfig locally
   --local-kubeconfig-path <path> Local kubeconfig output path (default: ~/.kube/astra-k3s-<host>.yaml)
+  --kubeconfig-server-ip <ip>    Rewrite local kubeconfig server endpoint to this IP (repeatable)
+  --cluster-name <name>          Local kubeconfig cluster/context/user name override
   --ssh-option <opt>             Extra SSH option (repeatable)
   --help                         Show help
 
@@ -31,6 +33,7 @@ Any arguments after `--` are passed to deploy-k3s-single-node.sh on the remote h
 Examples:
   deploy-k3s-single-node-remote.sh --host root@162.209.124.74 -- --disk-device auto --validation full
   deploy-k3s-single-node-remote.sh --host root@vm --git-ref main -- --astra-tag v0.1.0 --validation smoke
+  deploy-k3s-single-node-remote.sh --host root@100.110.236.66 --cluster-name hplcpc01 --kubeconfig-server-ip 100.110.236.66 --kubeconfig-server-ip 192.168.148.190 -- --host-public-ip 192.168.148.190 --tls-san 100.110.236.66 --node-name hplcpc01
 USAGE
 }
 
@@ -43,9 +46,11 @@ REMOTE_WORKSPACE=${REMOTE_WORKSPACE:-}
 BOOTSTRAP_REMOTE=true
 PULL_KUBECONFIG=true
 LOCAL_KUBECONFIG_PATH=${LOCAL_KUBECONFIG_PATH:-}
+CLUSTER_NAME=${CLUSTER_NAME:-}
 
 EXTRA_SSH_OPTS=()
 ON_HOST_ARGS=()
+KUBECONFIG_SERVER_IPS=()
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -60,6 +65,8 @@ while [ "$#" -gt 0 ]; do
     --pull-kubeconfig) PULL_KUBECONFIG=true; shift ;;
     --no-pull-kubeconfig) PULL_KUBECONFIG=false; shift ;;
     --local-kubeconfig-path) LOCAL_KUBECONFIG_PATH=${2:?missing value for --local-kubeconfig-path}; shift 2 ;;
+    --kubeconfig-server-ip) KUBECONFIG_SERVER_IPS+=("${2:?missing value for --kubeconfig-server-ip}"); shift 2 ;;
+    --cluster-name) CLUSTER_NAME=${2:?missing value for --cluster-name}; shift 2 ;;
     --ssh-option) EXTRA_SSH_OPTS+=("${2:?missing value for --ssh-option}"); shift 2 ;;
     --help|-h) usage; exit 0 ;;
     --)
@@ -78,6 +85,59 @@ if [ -z "${REMOTE_WORKSPACE}" ]; then
 fi
 
 astra_require_tools ssh scp git python3 || astra_die "missing local prerequisites"
+
+kubeconfig_label_for_ip() {
+  local ip=${1:?ip required}
+  local sanitized
+  sanitized=$(printf '%s' "${ip}" | tr -c 'A-Za-z0-9._-' '_')
+
+  if [[ "${ip}" == 100.* ]]; then
+    printf 'tailscale\n'
+    return 0
+  fi
+
+  if [[ "${ip}" == 10.* ]] || [[ "${ip}" == 192.168.* ]] || [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    printf 'lan\n'
+    return 0
+  fi
+
+  printf '%s\n' "${sanitized}"
+}
+
+rewrite_kubeconfig_local() {
+  local path=${1:?path required}
+  local server_ip=${2:?server ip required}
+  local cluster_name=${3:-}
+  python3 - <<'PY' "${path}" "${server_ip}" "${cluster_name}"
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+server_ip = sys.argv[2]
+cluster_name = sys.argv[3]
+text = path.read_text(encoding="utf-8", errors="ignore")
+
+text = re.sub(
+    r"^\s*server:\s+https://[^\n]+$",
+    f"    server: https://{server_ip}:6443",
+    text,
+    flags=re.MULTILINE,
+)
+
+if cluster_name:
+    replacements = [
+        (r"^(\s*current-context:\s*)default\s*$", r"\1" + cluster_name),
+        (r"^(\s*(?:-\s*)?name:\s*)default\s*$", r"\1" + cluster_name),
+        (r"^(\s*cluster:\s*)default\s*$", r"\1" + cluster_name),
+        (r"^(\s*user:\s*)default\s*$", r"\1" + cluster_name),
+    ]
+    for pattern, repl in replacements:
+        text = re.sub(pattern, repl, text, flags=re.MULTILINE)
+
+path.write_text(text, encoding="utf-8")
+PY
+}
 
 SSH_OPTS=(
   -o BatchMode=yes
@@ -176,36 +236,96 @@ if [ "${ssh_rc}" -ne 0 ]; then
 fi
 
 LOCAL_KUBECONFIG_FINAL=""
+LOCAL_KUBECONFIG_PATHS=()
 if astra_bool_true "${PULL_KUBECONFIG}"; then
-  if [ -z "${LOCAL_KUBECONFIG_PATH}" ]; then
-    host_label=$(printf '%s' "${REMOTE_HOST##*@}" | tr -c 'A-Za-z0-9._-' '_')
-    LOCAL_KUBECONFIG_PATH="${HOME}/.kube/astra-k3s-${host_label}.yaml"
+  target_kubeconfig_ips=()
+  if [ "${#KUBECONFIG_SERVER_IPS[@]}" -eq 0 ]; then
+    target_kubeconfig_ips=("${HOST_PUBLIC_IP}")
+  else
+    for server_ip in "${KUBECONFIG_SERVER_IPS[@]}"; do
+      seen=false
+      for existing_ip in "${target_kubeconfig_ips[@]-}"; do
+        if [ "${existing_ip}" = "${server_ip}" ]; then
+          seen=true
+          break
+        fi
+      done
+      if [ "${seen}" = "false" ]; then
+        target_kubeconfig_ips+=("${server_ip}")
+      fi
+    done
   fi
 
-  mkdir -p "$(dirname "${LOCAL_KUBECONFIG_PATH}")"
-  astra_log "copying kubeconfig from remote"
-  scp "${SSH_OPTS[@]}" "${REMOTE_HOST}:${REMOTE_KUBECONFIG_PATH}" "${LOCAL_KUBECONFIG_PATH}"
+  host_label=$(printf '%s' "${REMOTE_HOST##*@}" | tr -c 'A-Za-z0-9._-' '_')
+  base_local_path=${LOCAL_KUBECONFIG_PATH}
+  used_local_paths=()
 
-  python3 - <<'PY' "${LOCAL_KUBECONFIG_PATH}" "${HOST_PUBLIC_IP}"
-import pathlib
-import re
-import sys
+  for server_ip in "${target_kubeconfig_ips[@]}"; do
+    label=$(kubeconfig_label_for_ip "${server_ip}")
+    sanitized_ip=$(printf '%s' "${server_ip}" | tr -c 'A-Za-z0-9._-' '_')
 
-path = pathlib.Path(sys.argv[1])
-host_ip = sys.argv[2]
-text = path.read_text(encoding="utf-8", errors="ignore")
-text = re.sub(r'^\s*server:\s+https://[^\n]+$', f'    server: https://{host_ip}:6443', text, flags=re.MULTILINE)
-path.write_text(text, encoding="utf-8")
-PY
+    out_path=""
+    if [ "${#target_kubeconfig_ips[@]}" -eq 1 ]; then
+      if [ -n "${base_local_path}" ]; then
+        out_path=${base_local_path}
+      elif [ -n "${CLUSTER_NAME}" ]; then
+        out_path="${HOME}/.kube/${CLUSTER_NAME}.yaml"
+      else
+        out_path="${HOME}/.kube/astra-k3s-${host_label}.yaml"
+      fi
+    else
+      if [ -n "${base_local_path}" ]; then
+        out_dir=$(dirname "${base_local_path}")
+        out_file=$(basename "${base_local_path}")
+        case "${out_file}" in
+          *.yaml)
+            out_stem=${out_file%.yaml}
+            out_path="${out_dir}/${out_stem}-${label}.yaml"
+            ;;
+          *)
+            out_path="${out_dir}/${out_file}-${label}.yaml"
+            ;;
+        esac
+      elif [ -n "${CLUSTER_NAME}" ]; then
+        out_path="${HOME}/.kube/${CLUSTER_NAME}-${label}.yaml"
+      else
+        out_path="${HOME}/.kube/astra-k3s-${host_label}-${label}.yaml"
+      fi
+    fi
 
-  LOCAL_KUBECONFIG_FINAL=${LOCAL_KUBECONFIG_PATH}
+    for existing_path in "${used_local_paths[@]-}"; do
+      if [ "${existing_path}" = "${out_path}" ]; then
+        out_path="${out_path%.yaml}-${sanitized_ip}.yaml"
+        break
+      fi
+    done
+    used_local_paths+=("${out_path}")
+
+    mkdir -p "$(dirname "${out_path}")"
+    astra_log "copying kubeconfig from remote for server=${server_ip} path=${out_path}"
+    scp "${SSH_OPTS[@]}" "${REMOTE_HOST}:${REMOTE_KUBECONFIG_PATH}" "${out_path}"
+    rewrite_kubeconfig_local "${out_path}" "${server_ip}" "${CLUSTER_NAME}"
+    LOCAL_KUBECONFIG_PATHS+=("${out_path}")
+  done
+
+  if [ "${#LOCAL_KUBECONFIG_PATHS[@]}" -gt 0 ]; then
+    LOCAL_KUBECONFIG_FINAL=${LOCAL_KUBECONFIG_PATHS[0]}
+  fi
 fi
 
 rm -f "${remote_output_file}"
+
+LOCAL_KUBECONFIG_PATHS_JOINED=""
+if [ "${#LOCAL_KUBECONFIG_PATHS[@]}" -gt 0 ]; then
+  IFS=,
+  LOCAL_KUBECONFIG_PATHS_JOINED="${LOCAL_KUBECONFIG_PATHS[*]}"
+  unset IFS
+fi
 
 printf 'REMOTE_DEPLOY_SUMMARY_PATH=%s\n' "${REMOTE_DEPLOY_SUMMARY_PATH}"
 printf 'REMOTE_VALIDATION_SUMMARY_PATH=%s\n' "${VALIDATION_SUMMARY_PATH}"
 printf 'HOST_PUBLIC_IP=%s\n' "${HOST_PUBLIC_IP}"
 printf 'LOCAL_KUBECONFIG_PATH=%s\n' "${LOCAL_KUBECONFIG_FINAL}"
+printf 'LOCAL_KUBECONFIG_PATHS=%s\n' "${LOCAL_KUBECONFIG_PATHS_JOINED}"
 
 astra_log "remote deployment completed"
