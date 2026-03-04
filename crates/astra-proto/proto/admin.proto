@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package astraadminpb;
+
+message BulkLoadRequest {
+  string tenant_id = 1;
+  string manifest_source = 2;
+  string manifest_checksum = 3;
+  bool dry_run = 4;
+  bool allow_overwrite = 5;
+}
+
+message BulkLoadResponse {
+  string job_id = 1;
+  bool accepted = 2;
+  string message = 3;
+}
+
+message GetBulkLoadJobRequest {
+  string job_id = 1;
+}
+
+message GetBulkLoadJobResponse {
+  string job_id = 1;
+  string status = 2;
+  string message = 3;
+  uint64 records_total = 4;
+  uint64 records_applied = 5;
+  uint64 started_at_unix_ms = 6;
+  uint64 finished_at_unix_ms = 7;
+}
+
+service AstraAdmin {
+  rpc BulkLoad(BulkLoadRequest) returns (BulkLoadResponse);
+  rpc GetBulkLoadJob(GetBulkLoadJobRequest) returns (GetBulkLoadJobResponse);
+}

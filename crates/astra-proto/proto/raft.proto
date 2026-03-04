@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package astraraftpb;
+
+message RaftBytes {
+  bytes payload = 1;
+}
+
+service InternalRaft {
+  rpc AppendEntries(RaftBytes) returns (RaftBytes);
+  rpc Vote(RaftBytes) returns (RaftBytes);
+  rpc InstallSnapshot(RaftBytes) returns (RaftBytes);
+}
+
