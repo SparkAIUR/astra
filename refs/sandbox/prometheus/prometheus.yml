@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: astra
+    static_configs:
+      - targets:
+          - astra-node1:9479
+          - astra-node2:9479
+          - astra-node3:9479
