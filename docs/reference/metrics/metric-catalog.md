@@ -1,0 +1,85 @@
+---
+title: Metric Catalog
+summary: Prometheus metric inventory generated from astra-core metrics registry.
+audience: operators
+status: canonical
+last_verified: 2026-03-03
+source_of_truth:
+  - crates/astra-core/src/metrics.rs
+related_artifacts:
+  - docs/reference/metrics/slo-sli-reference.md
+  - refs/sandbox/grafana/dashboards/astra-overview.json
+---
+
+# Metric Catalog
+
+Generated from `crates/astra-core/src/metrics.rs`.
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `astra_bg_io_sqe_throttle_events_total` | `counter` | Total background SQE throttle wait events. |
+| `astra_bg_io_sqe_tokens_available` | `gauge` | Current available tokens in the background SQE token bucket. |
+| `astra_bg_io_sqe_wait_seconds` | `histogram` | Time spent waiting for background SQE operation budget. |
+| `astra_bg_io_throttle_events_total` | `counter` | Total background IO throttle wait events. |
+| `astra_bg_io_throttle_wait_seconds` | `histogram` | Time spent waiting for background IO token-bucket budget. |
+| `astra_bg_io_tokens_available` | `gauge` | Current available tokens in the background IO token bucket. |
+| `astra_forward_retry_attempts_total` | `counter` | Total forwarded RPC retry attempts. |
+| `astra_gateway_read_ticket_hits_total` | `counter` | Total gateway read requests that reused an active read ticket. |
+| `astra_gateway_read_ticket_misses_total` | `counter` | Total gateway read requests that required a fresh quorum check. |
+| `astra_gateway_singleflight_leader_total` | `counter` | Total gateway read requests elected as singleflight leaders. |
+| `astra_gateway_singleflight_overflow_total` | `counter` | Total gateway read requests that bypassed singleflight due to waiter cap. |
+| `astra_gateway_singleflight_waiter_timeouts_total` | `counter` | Total gateway waiter requests that timed out waiting for singleflight leader completion. |
+| `astra_gateway_singleflight_waiter_total` | `counter` | Total gateway read requests collapsed behind an in-flight leader request. |
+| `astra_list_prefetch_hits_total` | `counter` | LIST prefetch cache hits. |
+| `astra_list_prefetch_misses_total` | `counter` | LIST prefetch cache misses. |
+| `astra_list_prefix_filter_hits_total` | `counter` | LIST requests processed after prefix filter positive hit. |
+| `astra_list_prefix_filter_skips_total` | `counter` | LIST requests skipped by prefix negative filter. |
+| `astra_list_revision_filter_hits_total` | `counter` | LIST requests processed after prefix+revision filter hit. |
+| `astra_list_revision_filter_skips_total` | `counter` | LIST requests skipped by prefix+revision filter. |
+| `astra_lsm_synth_l0_files` | `gauge` | Synthetic L0 file pressure estimate derived from WAL queues. |
+| `astra_profile_active_auto` | `gauge` | Active profile gauge (1 when active). |
+| `astra_profile_active_gateway` | `gauge` | Active profile gauge (1 when active). |
+| `astra_profile_active_kubernetes` | `gauge` | Active profile gauge (1 when active). |
+| `astra_profile_active_omni` | `gauge` | Active profile gauge (1 when active). |
+| `astra_profile_applied_bg_io_tokens_per_sec` | `gauge` | Last profile-applied background IO token rate. |
+| `astra_profile_applied_prefetch_entries` | `gauge` | Last profile-applied list prefetch cache entry cap. |
+| `astra_profile_applied_put_linger_microseconds` | `gauge` | Last profile-applied put linger in microseconds. |
+| `astra_profile_applied_put_max_requests` | `gauge` | Last profile-applied put max_requests. |
+| `astra_profile_switch_total` | `counter` | Total profile transitions applied by the governor. |
+| `astra_put_batch_requests_total` | `counter` | Total put requests dispatched through the batcher. |
+| `astra_put_batch_size` | `histogram` | Number of put operations per dispatched batch. |
+| `astra_put_batches_total` | `counter` | Total dispatched put batches. |
+| `astra_put_inflight_requests` | `gauge` | Current estimated in-flight put requests (queued + dispatched). |
+| `astra_put_normal_queue_depth` | `gauge` | Current estimated queued normal put requests. |
+| `astra_put_queue_wait_normal_seconds` | `histogram` | Queue wait time between enqueue and batch dispatch for normal put requests. |
+| `astra_put_queue_wait_seconds` | `histogram` | Queue wait time between enqueue and batch dispatch for put requests. |
+| `astra_put_queue_wait_tier0_seconds` | `histogram` | Queue wait time between enqueue and batch dispatch for tier0 put requests. |
+| `astra_put_quorum_ack_seconds` | `histogram` | Time from batch submit to commit advancement signal. |
+| `astra_put_raft_client_write_seconds` | `histogram` | Duration of raft client_write for put batches. |
+| `astra_put_tier0_bypass_write_pressure_total` | `counter` | Total tier0 requests bypassing write-pressure control. |
+| `astra_put_tier0_dispatch_total` | `counter` | Total tier0 batches dispatched. |
+| `astra_put_tier0_enqueued_total` | `counter` | Total tier0 put requests enqueued. |
+| `astra_put_tier0_queue_depth` | `gauge` | Current estimated queued tier0 put requests. |
+| `astra_read_isolation_dispatch_total` | `counter` | Total read requests routed through isolated read lane. |
+| `astra_read_isolation_failures_total` | `counter` | Total isolated read dispatch failures that required inline fallback. |
+| `astra_read_quorum_checks_total` | `counter` | Total linearizable read quorum checks attempted. |
+| `astra_read_quorum_failures_total` | `counter` | Total linearizable read quorum check failures. |
+| `astra_read_quorum_internal_total` | `counter` | Total quorum-related internal read errors. |
+| `astra_request_delete_total` | `counter` | Total delete range requests. |
+| `astra_request_get_total` | `counter` | Total GET-like range requests. |
+| `astra_request_lease_total` | `counter` | Total lease API requests. |
+| `astra_request_list_total` | `counter` | Total LIST/prefix range requests. |
+| `astra_request_put_total` | `counter` | Total put requests. |
+| `astra_request_tier0_total` | `counter` | Total requests classified as tier0 critical. |
+| `astra_request_txn_total` | `counter` | Total txn requests. |
+| `astra_request_watch_total` | `counter` | Total watch stream requests. |
+| `astra_transport_closed_conn_unavailable_total` | `counter` | Total unavailable responses attributed to closed transport connections. |
+| `astra_wal_effective_linger_microseconds` | `gauge` | Effective WAL linger currently applied. |
+| `astra_wal_queue_bytes` | `gauge` | Current queued WAL payload bytes waiting for flush. |
+| `astra_wal_queue_depth` | `gauge` | Current queued WAL frames waiting for flush. |
+| `astra_write_reject_events_total` | `counter` | Total write requests rejected by L0 pressure control. |
+| `astra_write_stall_band_5_events_total` | `counter` | Total writes delayed by the L0==5 pressure band. |
+| `astra_write_stall_band_6_events_total` | `counter` | Total writes delayed by the L0==6 pressure band. |
+| `astra_write_stall_band_7_plus_events_total` | `counter` | Total writes delayed by the L0>=7 pressure band. |
+| `astra_write_stall_delay_seconds` | `histogram` | Write stall delay injected by L0 pressure controller. |
+| `astra_write_stall_events_total` | `counter` | Total write requests delayed by L0 pressure control. |

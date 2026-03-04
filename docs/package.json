@@ -1,0 +1,16 @@
+{
+  "name": "astra-docs",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "docs:dev": "vitepress dev",
+    "docs:sync": "uv run --project ../refs/scripts python ../refs/scripts/docs/sync_docs.py",
+    "docs:validate": "uv run --project ../refs/scripts python ../refs/scripts/docs/validate_docs.py",
+    "docs:check": "npm run docs:sync && npm run docs:validate && npm run docs:build",
+    "docs:build": "vitepress build",
+    "docs:preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}
