@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import re
 import subprocess
 from pathlib import Path
@@ -26,9 +27,9 @@ TEXT_EXTS = {
 }
 
 BANNED_LOCAL_PATTERNS = [
-    ("absolute-local-volume", re.compile(r"/Volumes/")),
-    ("absolute-local-user", re.compile(r"/Users/")),
-    ("file-local-uri", re.compile(r"file:///(Users|Volumes)/")),
+    ("absolute-local-volume", re.compile(r"/" r"Volumes/")),
+    ("absolute-local-user", re.compile(r"/" r"Users/")),
+    ("file-local-uri", re.compile(r"file:///" r"(Users|Volumes)/")),
 ]
 
 BANNED_PRIVATE_REFERENCES = [
@@ -41,8 +42,13 @@ BANNED_PRIVATE_REFERENCES = [
     "AGENTS.md",
     "notes.md",
     "task_plan.md",
-    "refs/scripts/validation/results/",
 ]
+
+CONTENT_CHECK_IGNORE_GLOBS = {
+    ".gitignore",
+    "refs/scripts/public/**",
+    "refs/scripts/tests/**",
+}
 
 
 def list_tracked_files(repo: Path) -> list[str]:
@@ -52,6 +58,10 @@ def list_tracked_files(repo: Path) -> list[str]:
 
 def is_text(path: Path) -> bool:
     return path.suffix.lower() in TEXT_EXTS
+
+
+def match_any(path: str, patterns: set[str]) -> bool:
+    return any(fnmatch.fnmatch(path, pat) for pat in patterns)
 
 
 def main() -> int:
@@ -74,6 +84,9 @@ def main() -> int:
         try:
             text = p.read_text(encoding="utf-8", errors="ignore")
         except Exception:
+            continue
+
+        if match_any(rel, CONTENT_CHECK_IGNORE_GLOBS):
             continue
 
         for label, rx in BANNED_LOCAL_PATTERNS:

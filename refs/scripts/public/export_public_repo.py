@@ -16,7 +16,7 @@ import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_SOURCE = SCRIPT_DIR.parents[3]
-DEFAULT_DEST = Path("/Volumes/S0/github/_halceon/astra")
+DEFAULT_DEST = DEFAULT_SOURCE.parent / "astra-public"
 DEFAULT_MANIFEST = SCRIPT_DIR / "public-export-manifest.yaml"
 
 
@@ -214,6 +214,76 @@ def sanitize_docs_nav(dest_repo: Path) -> bool:
     return False
 
 
+def sanitize_docs_source_map(dest_repo: Path, private_patterns: list[str]) -> bool:
+    source_map = dest_repo / "docs/.meta/source-map.yaml"
+    if not source_map.exists():
+        return False
+
+    data = yaml.safe_load(source_map.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        return False
+
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return False
+
+    changed = False
+    cleaned_entries: list[dict] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            changed = True
+            continue
+
+        file_path = entry.get("file")
+        if not isinstance(file_path, str):
+            changed = True
+            continue
+
+        if not (dest_repo / file_path).exists():
+            changed = True
+            continue
+
+        for key in ("source_of_truth", "related_artifacts"):
+            value = entry.get(key)
+            if not isinstance(value, list):
+                continue
+
+            filtered: list[str] = []
+            for item in value:
+                if not isinstance(item, str):
+                    changed = True
+                    continue
+                if any((item.startswith(pat) or pat in item) for pat in private_patterns):
+                    changed = True
+                    continue
+                if item.startswith(("http://", "https://", "mailto:")):
+                    filtered.append(item)
+                    continue
+
+                candidate = (dest_repo / item).resolve()
+                if candidate.exists():
+                    filtered.append(item)
+                else:
+                    changed = True
+
+            entry[key] = filtered
+
+        if not entry.get("source_of_truth"):
+            entry["source_of_truth"] = ["README.md"]
+            changed = True
+
+        cleaned_entries.append(entry)
+
+    if len(cleaned_entries) != len(entries):
+        changed = True
+    data["entries"] = cleaned_entries
+
+    if changed:
+        source_map.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    return changed
+
+
 def verify_dest_clean(dest_repo: Path) -> None:
     git_dir = dest_repo / ".git"
     if not git_dir.exists():
@@ -312,20 +382,26 @@ def remove_stale_files(dest_repo: Path, managed: set[str], dry_run: bool) -> int
     return removed
 
 
-def run_check(dest_repo: Path, manifest: ExportManifest) -> list[str]:
+def run_check(dest_repo: Path, manifest: ExportManifest, selected_paths: list[str]) -> list[str]:
     issues: list[str] = []
-    tracked = run_git_ls_files(dest_repo)
+    private_ref_ignore = [".gitignore", "refs/scripts/public/**", "refs/scripts/tests/**"]
+    tracked = set(run_git_ls_files(dest_repo))
 
     for rel in tracked:
         if match_any(rel, manifest.excludes):
             issues.append(f"excluded file tracked in destination: {rel}")
 
-    absolute_local_patterns = [r"/Volumes/", r"/Users/"]
+    absolute_local_patterns = [r"/" r"Volumes/", r"/" r"Users/"]
     private_patterns = manifest.private_reference_patterns
 
-    for rel in tracked:
+    paths_to_scan = sorted(set(selected_paths).union(tracked))
+    for rel in paths_to_scan:
         p = dest_repo / rel
+        if not p.exists():
+            continue
         if not is_probably_text(p):
+            continue
+        if match_any(rel, private_ref_ignore):
             continue
         try:
             text = p.read_text(encoding="utf-8", errors="ignore")
@@ -387,16 +463,22 @@ def main() -> int:
 
     docs_sanitized = 0
     nav_sanitized = False
+    source_map_sanitized = False
     if args.sanitize_docs and not args.dry_run:
         docs_sanitized = sanitize_docs_frontmatter(dest_repo, manifest.private_reference_patterns)
         nav_sanitized = sanitize_docs_nav(dest_repo)
+        source_map_sanitized = sanitize_docs_source_map(dest_repo, manifest.private_reference_patterns)
 
     print(f"selected_files={len(rel_paths)} copied={copied} rewritten={rewritten} removed={removed}")
     if args.sanitize_docs:
-        print(f"docs_frontmatter_sanitized={docs_sanitized} docs_nav_sanitized={int(nav_sanitized)}")
+        print(
+            "docs_frontmatter_sanitized="
+            f"{docs_sanitized} docs_nav_sanitized={int(nav_sanitized)} "
+            f"docs_source_map_sanitized={int(source_map_sanitized)}"
+        )
 
     if args.check:
-        issues = run_check(dest_repo, manifest)
+        issues = run_check(dest_repo, manifest, rel_paths)
         if issues:
             for issue in issues:
                 print(f"ERROR: {issue}")

@@ -14,8 +14,8 @@ This directory contains tooling for exporting the private Astra repository into 
 
 ```bash
 uv run --project refs/scripts python refs/scripts/public/export_public_repo.py \
-  --source /Volumes/S0/github/_sparkai/astra \
-  --dest /Volumes/S0/github/_halceon/astra \
+  --source . \
+  --dest ../astra-public \
   --mode full \
   --rewrite \
   --sanitize-docs
@@ -25,8 +25,8 @@ uv run --project refs/scripts python refs/scripts/public/export_public_repo.py \
 
 ```bash
 uv run --project refs/scripts python refs/scripts/public/export_public_repo.py \
-  --source /Volumes/S0/github/_sparkai/astra \
-  --dest /Volumes/S0/github/_halceon/astra \
+  --source . \
+  --dest ../astra-public \
   --mode incremental \
   --bucket workspace \
   --rewrite \
@@ -37,10 +37,10 @@ uv run --project refs/scripts python refs/scripts/public/export_public_repo.py \
 
 ```bash
 uv run --project refs/scripts python refs/scripts/public/export_public_repo.py \
-  --source /Volumes/S0/github/_sparkai/astra \
-  --dest /Volumes/S0/github/_halceon/astra \
+  --source . \
+  --dest ../astra-public \
   --check
 
 uv run --project refs/scripts python refs/scripts/public/validate_public_hygiene.py \
-  --repo /Volumes/S0/github/_halceon/astra
+  --repo ../astra-public
 ```
