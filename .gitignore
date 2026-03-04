@@ -1,0 +1,11 @@
+refs/scripts/.venv/
+refs/scripts/data/*.db
+refs/scripts/src/*.egg-info/
+refs/scripts/validation/results/**/runtime/
+refs/scripts/validation/results/**/k3s-*/
+refs/scripts/validation/results/**/k3s-*.log
+refs/scripts/validation/results/**/telemetry-*/
+__pycache__/
+.pytest_cache/
+target/
+data/
