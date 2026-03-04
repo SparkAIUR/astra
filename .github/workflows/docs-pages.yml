@@ -49,6 +49,7 @@ jobs:
         run: uv run --project refs/scripts python refs/scripts/docs/validate_docs.py
 
       - name: Validate public repo hygiene
+        if: github.repository == 'SparkAIUR/astra'
         run: uv run --project refs/scripts python refs/scripts/public/validate_public_hygiene.py --repo .
 
       - name: Build
