@@ -38,7 +38,10 @@ def page_from_path(path: Path, docs_dir: Path) -> str:
 def build_source_map(docs_dir: Path) -> dict:
     entries = []
     for md in sorted(docs_dir.rglob("*.md")):
-        if any(part.startswith(".") for part in md.relative_to(docs_dir).parts):
+        parts = md.relative_to(docs_dir).parts
+        if any(part.startswith(".") for part in parts):
+            continue
+        if parts and parts[0] in {"node_modules", "dist"}:
             continue
 
         frontmatter = parse_frontmatter(md)
@@ -71,6 +74,21 @@ def main() -> int:
     args = parser.parse_args()
 
     data = build_source_map(args.docs_dir)
+    if args.output.exists():
+        try:
+            existing = yaml.safe_load(args.output.read_text(encoding="utf-8")) or {}
+        except Exception:
+            existing = {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("docs_root") == data.get("docs_root")
+            and existing.get("entries") == data.get("entries")
+            and isinstance(existing.get("generated_at"), str)
+            and existing.get("generated_at")
+        ):
+            # Keep generated_at stable when the source-map content is unchanged.
+            data["generated_at"] = existing["generated_at"]
+
     rendered = yaml.safe_dump(data, sort_keys=False)
 
     if args.check:

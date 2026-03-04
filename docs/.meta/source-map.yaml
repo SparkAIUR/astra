@@ -1,4 +1,4 @@
-generated_at: '2026-03-03T21:43:17Z'
+generated_at: '2026-03-04T16:48:41Z'
 docs_root: docs
 entries:
 - page: /architecture
@@ -89,10 +89,13 @@ entries:
   file: docs/guides/deploy-k3s-with-astra.md
   title: Deploy Astra + K3s (Single Node and Cluster)
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-04
   source_of_truth:
-  - refs/scripts/validation/phase6-common.sh
-  - docker-compose.yml
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - refs/scripts/deploy/deploy-k3s-single-node-remote.sh
+  - refs/scripts/validation/docker-compose.image.yml
+  - refs/scripts/validation/docker-compose.k3s-single-node.yml
+  - refs/scripts/validation/k3s-single-node-readiness.sh
   related_artifacts:
   - docs/guides/migration-k3s.md
   - docs/operations/deploy-production.md
