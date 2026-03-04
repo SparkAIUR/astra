@@ -39,6 +39,22 @@ require_tools() {
 wait_for_ready_pod() {
   local ns=${1:?namespace required}
   local label=${2:?label selector required}
+
+  local found=false
+  local i
+  for i in $(seq 1 60); do
+    if kubectl -n "${ns}" get pods -l "${label}" --no-headers 2>/dev/null | grep -q .; then
+      found=true
+      break
+    fi
+    sleep 2
+  done
+
+  if [ "${found}" != "true" ]; then
+    log "timed out waiting for pod selector=${label} in namespace=${ns}"
+    return 1
+  fi
+
   kubectl -n "${ns}" wait --for=condition=Ready "pod" -l "${label}" --timeout=180s >/dev/null
 }
 
@@ -216,6 +232,7 @@ spec:
               number: 80
 EOF
 
+  kubectl -n "${NAMESPACE}" rollout status deployment/whoami --timeout=180s >/dev/null
   wait_for_ready_pod "${NAMESPACE}" "app=whoami"
 
   log "deploying local-path PVC IO probe"
