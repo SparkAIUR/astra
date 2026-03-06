@@ -1,4 +1,4 @@
-REPORT ?= phase12
+REPORT ?=
 PY := uv run --project refs/scripts python
 SPARKIFY := bash refs/scripts/public/run_sparkify.sh
 DOCS_DIR := docs
@@ -15,6 +15,8 @@ REPORT_MSG := refs/tasks/reports/$(REPORT)-validation-report-msg.md
 .PHONY: report-msg scripts-test docs-sync docs-validate docs-build docs-check public-hygiene reports-generate omni-render k3s-dry-run release-dry-run publish-crates publish-images publish-forge
 
 report-msg:
+	test -n "$(REPORT)" || (echo "set REPORT=<report-name>" >&2; exit 1)
+	test -f "$(REPORT_DOC)" || (echo "missing input report: $(REPORT_DOC)" >&2; exit 1)
 	mkdir -p $(dir $(REPORT_MSG))
 	$(PY) refs/scripts/validation/build_validation_report_msg.py \
 		$(REPORT_DOC) \

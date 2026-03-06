@@ -17,7 +17,7 @@
 cargo check --workspace
 cargo test --workspace
 uv run --project refs/scripts pytest -q
-npm --prefix docs run docs:check
+make docs-check
 ```
 
 ## Pull Requests

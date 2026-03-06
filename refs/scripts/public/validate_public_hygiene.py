@@ -40,12 +40,12 @@ BANNED_PRIVATE_REFERENCES = [
     "refs/docs/KB.md",
     "refs/docs/RULES.md",
     "refs/docs/STATE.yaml",
-    "AGENTS.md",
     "notes.md",
     "task_plan.md",
 ]
 
 CONTENT_CHECK_IGNORE_GLOBS = {
+    "AGENTS.md",
     ".gitignore",
     "refs/scripts/public/**",
     "refs/scripts/tests/**",

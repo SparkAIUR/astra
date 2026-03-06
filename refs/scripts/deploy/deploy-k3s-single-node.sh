@@ -457,7 +457,6 @@ write_summary() {
     "${K3S_VERSION_INSTALLED}" "${REPO_DIR}" "${RESULTS_DIR}" "${DEPLOY_LOG_PATH}" \
     "${COMPOSE_PS_PATH}" "${node_total}" "${node_ready}" "${kube_system_unhealthy}" \
     "${NODE_NAME}" "${tls_sans_json}" "${kubelet_args_json}" "${BACKUP_TARGET}" "${S3_BUCKET}" \
-    "${NODE_NAME}" "${tls_sans_json}" "${kubelet_args_json}" "${BACKUP_TARGET}" "${S3_BUCKET}" \
     "${S3_PREFIX}" "${BACKUP_ARCHIVE_PREFIX}" "${SERVICE_LB_ENABLED}" "${K3S_SNAPSHOTTER}" \
     "${K3S_RUNTIME_CONFIG_FILE}"
 import json
