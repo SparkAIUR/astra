@@ -1,3 +1,4 @@
+REPORT ?= phase12
 PY := uv run --project refs/scripts python
 SPARKIFY := bash refs/scripts/public/run_sparkify.sh
 DOCS_DIR := docs
@@ -8,8 +9,23 @@ TAG ?= v0.1.1-rc1
 VERSION ?= 0.1.1-rc1
 SPARKIFY_VERSION ?= 0.2.3
 OMNI_CHART ?=
+REPORT_DOC := refs/tasks/reports/$(REPORT)-validation-report.md
+REPORT_MSG := refs/tasks/reports/$(REPORT)-validation-report-msg.md
 
-.PHONY: docs-sync docs-validate docs-build docs-check public-hygiene reports-generate omni-render k3s-dry-run release-dry-run publish-crates publish-images publish-forge
+.PHONY: report-msg scripts-test docs-sync docs-validate docs-build docs-check public-hygiene reports-generate omni-render k3s-dry-run release-dry-run publish-crates publish-images publish-forge
+
+report-msg:
+	mkdir -p $(dir $(REPORT_MSG))
+	$(PY) refs/scripts/validation/build_validation_report_msg.py \
+		$(REPORT_DOC) \
+		--repo-root . \
+		--clean-referenced-logs \
+		--output $(REPORT_MSG)
+
+scripts-test:
+	uv sync --project refs/scripts --extra dev
+	uv run --project refs/scripts pytest -q refs/scripts/tests
+	find refs/scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
 docs-sync:
 	$(PY) refs/scripts/docs/sync_docs.py
@@ -40,6 +56,7 @@ k3s-dry-run:
 
 release-dry-run:
 	cargo check --workspace
+	$(MAKE) scripts-test
 	bash refs/scripts/release/build-image.sh $(TAG)
 	bash refs/scripts/release/build-forge-image.sh $(TAG)
 	bash refs/scripts/release/publish-crates.sh --version $(VERSION) --dry-run

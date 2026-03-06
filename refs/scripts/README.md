@@ -25,7 +25,7 @@ uv run --project refs/scripts pytest -q
 ## Validation Helpers
 ```bash
 # Make target (recommended):
-REPORT=phase4 make report-msg
+REPORT=phase12 make report-msg
 
 # 1) Compact noisy logs (drops DEBUG by default, strips timestamps, compacts repeats)
 uv run --project refs/scripts python refs/scripts/validation/compact_log.py \
@@ -33,7 +33,7 @@ uv run --project refs/scripts python refs/scripts/validation/compact_log.py \
 
 # 2) Build report message markdown with inlined referenced files
 uv run --project refs/scripts python refs/scripts/validation/build_validation_report_msg.py \
-  <report.md> \
+  refs/tasks/reports/<report>.md \
   --repo-root . \
   --clean-referenced-logs
 ```
