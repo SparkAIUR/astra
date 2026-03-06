@@ -1,0 +1,66 @@
+{
+  "last_updated": "2026-03-05",
+  "sources": [
+    "refs/docs/phase4-validation-report.md",
+    "refs/docs/phase6-validation-report.md",
+    "refs/docs/phase9-validation-report.md",
+    "refs/docs/phase10-validation-report.md",
+    "refs/docs/phase11-validation-report.md",
+    "refs/docs/phase12-validation-report.md"
+  ],
+  "astra_vs_etcd": [
+    {
+      "phase": "Phase 4",
+      "date": "2026-02-27",
+      "scenario": "150 IOPS survival, wal_low_linger tuned run",
+      "status": "PASS",
+      "workload": "50k write scenario under blkio shaping",
+      "astra_summary": "7267.42 RPS, 47.52 ms p99, 50k/50k writes, no OOM",
+      "etcd_summary": "980.17 RPS on the same run shape",
+      "notes": "This was the first public-quality proof that Astra could beat etcd decisively under the constrained-disk scenario that originally blocked the project."
+    },
+    {
+      "phase": "Phase 6",
+      "date": "2026-02-28",
+      "scenario": "K3s external datastore benchmark",
+      "status": "PASS with cardinality caveat",
+      "workload": "kwok-driven K3s churn at ~17k pod realization",
+      "astra_summary": "PUT 335.25 ms p99, GET 312.17 ms p99, LIST 2952.64 ms p99, 1001 nodes / 17506 pods / 10001 configmaps",
+      "etcd_summary": "PUT 158.11 ms p99, GET 143.06 ms p99, LIST 2728.32 ms p99, 1001 nodes / 16113 pods / 10001 configmaps",
+      "notes": "Astra was stable but materially slower than etcd for this early control-plane workload shape."
+    },
+    {
+      "phase": "Phase 9",
+      "date": "2026-03-03",
+      "scenario": "RC2 K3s acceptance matrix",
+      "status": "PASS",
+      "workload": "30k pod cardinality, post-warmup acceptance run",
+      "astra_summary": "PUT 151.13 ms p99, GET 117.06 ms p99, LIST 268.02 ms p99, peak disk IOPS 30.0, iowait p99 5.0%",
+      "etcd_summary": "PUT 106.01 ms p99, GET 108.01 ms p99, LIST 259.00 ms p99, peak disk IOPS 22.0, iowait p99 16.5%",
+      "notes": "This run closed the biggest K3s acceptance gaps: GET decoupling, LIST parity, iowait harmony, and 30k pod realization."
+    }
+  ],
+  "feature_validations": [
+    {
+      "phase": "Phase 10",
+      "date": "2026-03-03",
+      "scenario": "QoS, governor, ecosystem, and gray-failure suite",
+      "status": "PASS",
+      "summary": "Gateway storm reached 13447.49 RPS with 0.0253% error rate; Patroni lease updates stayed at 33.02 ms p99; gray-failure delta gate passed with stable leader behavior."
+    },
+    {
+      "phase": "Phase 11",
+      "date": "2026-03-03",
+      "scenario": "Migration DX and Omni fleet cutover",
+      "status": "PASS",
+      "summary": "5 sources converged with 5/5 tenant parity matches; 5/5 real Omni external-etcd boots passed with no key loss."
+    },
+    {
+      "phase": "Phase 12",
+      "date": "2026-03-05",
+      "scenario": "Directive closure run",
+      "status": "PASS",
+      "summary": "50k watch fanout passed at 4995.20 write RPS and 150 ms lag p99; semantic cache showed 1.299x RPS gain and 1.292x p99 improvement; multi-raft prefix sharding reached 2.009x scale gain."
+    }
+  ]
+}

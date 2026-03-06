@@ -8,6 +8,6 @@ refs/scripts/validation/results/**/telemetry-*/
 __pycache__/
 .pytest_cache/
 target/
-data/
+/data/
 dist/
 node_modules/
