@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -488,10 +489,17 @@ def main() -> int:
 
     rel_paths = collect_source_files(source_repo, manifest, bucket)
     rewrites = manifest.rewrites if args.rewrite else []
+    effective_dest_repo = dest_repo
+    temp_check_dir: tempfile.TemporaryDirectory[str] | None = None
+
+    if args.check and not args.dry_run:
+        temp_check_dir = tempfile.TemporaryDirectory(prefix="astra-public-export-check-")
+        effective_dest_repo = Path(temp_check_dir.name)
+        shutil.copytree(dest_repo, effective_dest_repo, dirs_exist_ok=True)
 
     copied, rewritten = copy_selected_files(
         source_repo=source_repo,
-        dest_repo=dest_repo,
+        dest_repo=effective_dest_repo,
         rel_paths=rel_paths,
         rewrites=rewrites,
         dry_run=args.dry_run,
@@ -499,15 +507,15 @@ def main() -> int:
 
     removed = 0
     if args.mode == "full" and bucket is None:
-        removed = remove_stale_files(dest_repo, set(rel_paths), dry_run=args.dry_run)
+        removed = remove_stale_files(effective_dest_repo, set(rel_paths), dry_run=args.dry_run)
 
     docs_sanitized = 0
     nav_sanitized = False
     source_map_sanitized = False
     if args.sanitize_docs and not args.dry_run:
-        docs_sanitized = sanitize_docs_frontmatter(dest_repo, manifest.private_reference_patterns)
-        nav_sanitized = sanitize_docs_nav(dest_repo)
-        source_map_sanitized = sanitize_docs_source_map(dest_repo, manifest.private_reference_patterns)
+        docs_sanitized = sanitize_docs_frontmatter(effective_dest_repo, manifest.private_reference_patterns)
+        nav_sanitized = sanitize_docs_nav(effective_dest_repo)
+        source_map_sanitized = sanitize_docs_source_map(effective_dest_repo, manifest.private_reference_patterns)
 
     print(f"selected_files={len(rel_paths)} copied={copied} rewritten={rewritten} removed={removed}")
     if args.sanitize_docs:
@@ -518,12 +526,17 @@ def main() -> int:
         )
 
     if args.check:
-        issues = run_check(dest_repo, manifest, rel_paths)
+        issues = run_check(effective_dest_repo, manifest, rel_paths)
         if issues:
             for issue in issues:
                 print(f"ERROR: {issue}")
+            if temp_check_dir is not None:
+                temp_check_dir.cleanup()
             return 1
         print("check=ok")
+
+    if temp_check_dir is not None:
+        temp_check_dir.cleanup()
 
     return 0
 
