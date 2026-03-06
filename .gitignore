@@ -9,3 +9,5 @@ __pycache__/
 .pytest_cache/
 target/
 data/
+dist/
+node_modules/
