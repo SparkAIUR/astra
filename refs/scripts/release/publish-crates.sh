@@ -45,7 +45,12 @@ PACKAGES=(astra-proto astra-core astractl astrad astra-forge)
 
 crate_exists() {
   local pkg=${1:?pkg required}
-  curl --silent --show-error --fail "https://crates.io/api/v1/crates/${pkg}/${VERSION}" >/dev/null
+  curl \
+    --silent \
+    --show-error \
+    --fail \
+    --header "User-Agent: astra-release-script/1.0" \
+    "https://crates.io/api/v1/crates/${pkg}/${VERSION}" >/dev/null
 }
 
 publish_or_skip() {
