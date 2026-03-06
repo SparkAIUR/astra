@@ -48,6 +48,17 @@ crate_exists() {
   (cd /tmp && cargo info "${pkg}" 2>/dev/null | grep -q "version: ${VERSION}")
 }
 
+publish_or_skip() {
+  local pkg=${1:?pkg required}
+
+  if crate_exists "${pkg}"; then
+    echo "[publish-crates] ${pkg}@${VERSION} already published; skipping"
+    return 10
+  fi
+
+  cargo publish -p "${pkg}"
+}
+
 wait_for_crate() {
   local pkg=${1:?pkg required}
   local version=${2:?version required}
@@ -96,10 +107,19 @@ for idx in "${!PACKAGES[@]}"; do
         ;;
     esac
   else
-    cargo publish -p "${pkg}"
+    if publish_or_skip "${pkg}"; then
+      published_now=true
+    else
+      status=$?
+      if [ "${status}" -eq 10 ]; then
+        published_now=false
+      else
+        exit "${status}"
+      fi
+    fi
   fi
 
-  if [ "${DRY_RUN}" != "true" ] && [ "${SKIP_WAIT}" != "true" ] && [ "${idx}" -lt "$(( ${#PACKAGES[@]} - 1 ))" ]; then
+  if [ "${DRY_RUN}" != "true" ] && [ "${published_now:-false}" = "true" ] && [ "${SKIP_WAIT}" != "true" ] && [ "${idx}" -lt "$(( ${#PACKAGES[@]} - 1 ))" ]; then
     wait_for_crate "${pkg}" "${VERSION}" || true
   fi
 done
