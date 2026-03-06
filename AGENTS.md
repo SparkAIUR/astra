@@ -1,4 +1,4 @@
-# AGENTS.md
+# Maintainer Guide
 
 ## Purpose
 This file is the persistent working-knowledge index for the public Astra repository. It describes how to resume work quickly, where public and private context lives, and how to keep the maintainer workspace durable across sessions.
@@ -32,8 +32,8 @@ These paths are intentionally gitignored and may contain internal notes, plans, 
 Use them freely for maintainer context. Do not reference them from tracked public docs or code.
 
 ## Startup Checklist
-1. Read `refs/docs/STATE.yaml` if it exists locally.
-2. Read `refs/docs/KB.md` if it exists locally.
+1. Read the current state snapshot and knowledge-base notes from the local ignored `refs/docs/` workspace if it exists.
+2. Read any active maintainer task specs or reports from the local ignored `refs/tasks/` workspace if they exist.
 3. Run `uv run --project refs/scripts ctxctl mem compact-context --token-budget 1200` when the local maintainer workspace is available.
 4. Regenerate docs and public reports before release work.
 

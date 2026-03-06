@@ -26,9 +26,6 @@ uv run --project refs/scripts python refs/scripts/public/generate_public_reports
 
 ## Sources
 
-- `refs/docs/phase4-validation-report.md`
-- `refs/docs/phase6-validation-report.md`
-- `refs/docs/phase9-validation-report.md`
-- `refs/docs/phase10-validation-report.md`
-- `refs/docs/phase11-validation-report.md`
-- `refs/docs/phase12-validation-report.md`
+- `Sanitized benchmark summaries curated from internal validation runs`
+- `Public research pages under docs/research/`
+- `Benchmark methodology and scenario notes maintained in this repository`
