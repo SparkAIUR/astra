@@ -15,6 +15,7 @@ repo_override=""
 results_override=""
 logs_override=""
 bin_override=""
+awscli_override=""
 ghz_override=""
 grpcurl_override=""
 etcd_override=""
@@ -26,6 +27,7 @@ while [ "$#" -gt 0 ]; do
     --results-dir) results_override=${2:?missing value for --results-dir}; shift 2 ;;
     --logs-dir) logs_override=${2:?missing value for --logs-dir}; shift 2 ;;
     --bin-dir) bin_override=${2:?missing value for --bin-dir}; shift 2 ;;
+    --awscli-version) awscli_override=${2:?missing value for --awscli-version}; shift 2 ;;
     --ghz-version) ghz_override=${2:?missing value for --ghz-version}; shift 2 ;;
     --grpcurl-version) grpcurl_override=${2:?missing value for --grpcurl-version}; shift 2 ;;
     --etcd-version) etcd_override=${2:?missing value for --etcd-version}; shift 2 ;;
@@ -37,6 +39,7 @@ Usage: bootstrap-ubuntu24-host.sh [options]
   --results-dir <path>     Results directory
   --logs-dir <path>        Logs directory
   --bin-dir <path>         Workspace binary helper directory
+  --awscli-version <tag>   AWS CLI version (default: latest)
   --ghz-version <tag>      ghz release tag (default: v0.121.0)
   --grpcurl-version <tag>  grpcurl release tag (default: v1.9.3)
   --etcd-version <tag>     etcd release tag (default: v3.6.8)
@@ -55,6 +58,7 @@ ASTRA_RESULTS_DIR=${results_override:-${ASTRA_RESULTS_DIR:-${ASTRA_WORKSPACE}/re
 ASTRA_LOG_DIR=${logs_override:-${ASTRA_LOG_DIR:-${ASTRA_WORKSPACE}/logs}}
 ASTRA_BIN_DIR=${bin_override:-${ASTRA_BIN_DIR:-${ASTRA_WORKSPACE}/bin}}
 
+AWSCLI_VERSION=${awscli_override:-${AWSCLI_VERSION:-latest}}
 GHZ_VERSION=${ghz_override:-${GHZ_VERSION:-v0.121.0}}
 GRPCURL_VERSION=${grpcurl_override:-${GRPCURL_VERSION:-v1.9.3}}
 ETCD_VERSION=${etcd_override:-${ETCD_VERSION:-v3.6.8}}
@@ -172,6 +176,41 @@ install_binary_from_release_archive() {
   rm -rf "${tmpdir}"
 }
 
+install_aws_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    log "aws already installed at $(command -v aws)"
+    return 0
+  fi
+
+  local url suffix archive tmpdir install_args=()
+  if [ "${AWSCLI_VERSION}" = "latest" ]; then
+    suffix=".zip"
+  else
+    suffix="-${AWSCLI_VERSION}.zip"
+  fi
+  url="https://awscli.amazonaws.com/awscli-exe-linux-x86_64${suffix}"
+  log "downloading awscli from ${url}"
+
+  archive=$(mktemp)
+  tmpdir=$(mktemp -d)
+  curl -fL "${url}" -o "${archive}"
+  unzip -q "${archive}" -d "${tmpdir}"
+
+  if [ ! -x "${tmpdir}/aws/install" ]; then
+    rm -f "${archive}"
+    rm -rf "${tmpdir}"
+    die "aws installer missing from downloaded archive"
+  fi
+
+  if [ -e /usr/local/bin/aws ] || [ -d /usr/local/aws-cli ]; then
+    install_args=(--bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update)
+  fi
+
+  "${tmpdir}/aws/install" "${install_args[@]}"
+  rm -f "${archive}"
+  rm -rf "${tmpdir}"
+}
+
 ensure_docker_and_compose() {
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     log "docker + docker compose already installed"
@@ -272,7 +311,7 @@ EOF
 set -euo pipefail
 [ -f /etc/profile.d/astra.sh ] && . /etc/profile.d/astra.sh
 
-for cmd in docker ghz grpcurl etcdctl python3 jq make git; do
+for cmd in docker aws ghz grpcurl etcdctl python3 jq make git; do
   if command -v "$cmd" >/dev/null 2>&1; then
     printf '[ok] %s -> %s\n' "$cmd" "$(command -v "$cmd")"
   else
@@ -302,7 +341,6 @@ EOF
 
 install_tooling() {
   install_apt_packages_if_missing \
-    awscli \
     bash-completion \
     ca-certificates \
     coreutils \
@@ -318,6 +356,7 @@ install_tooling() {
     xz-utils
 
   ensure_docker_and_compose
+  install_aws_cli
   install_binary_from_release_archive \
     ghz \
     bojand/ghz \

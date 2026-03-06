@@ -8,6 +8,7 @@ Usage:
 
 Examples:
   refs/scripts/validation/bootstrap-ubuntu24-remote.sh root@100.118.182.89
+  AWSCLI_VERSION=2.27.54 refs/scripts/validation/bootstrap-ubuntu24-remote.sh root@100.118.182.89
   ASTRA_WORKSPACE=/root/astra-phase4 refs/scripts/validation/bootstrap-ubuntu24-remote.sh root@100.118.182.89
 EOF
 }
@@ -40,7 +41,7 @@ for arg in "$@"; do
 done
 
 env_exports=""
-for name in ASTRA_WORKSPACE ASTRA_REPO_DIR ASTRA_RESULTS_DIR ASTRA_LOG_DIR ASTRA_BIN_DIR GHZ_VERSION GRPCURL_VERSION ETCD_VERSION; do
+for name in ASTRA_WORKSPACE ASTRA_REPO_DIR ASTRA_RESULTS_DIR ASTRA_LOG_DIR ASTRA_BIN_DIR AWSCLI_VERSION GHZ_VERSION GRPCURL_VERSION ETCD_VERSION; do
   if [ -n "${!name:-}" ]; then
     env_exports+="${name}=$(printf '%q' "${!name}") "
   fi
