@@ -82,16 +82,16 @@ for idx in "${!PACKAGES[@]}"; do
         if crate_exists astra-proto; then
           cargo publish -p "${pkg}" --dry-run
         else
-          echo "[publish-crates] astra-proto not on crates.io yet; using cargo package for ${pkg}"
-          cargo package -p "${pkg}"
+          echo "[publish-crates] astra-proto not on crates.io yet; using cargo check for ${pkg}"
+          cargo check -p "${pkg}"
         fi
         ;;
       astrad|astra-forge)
         if crate_exists astra-core; then
           cargo publish -p "${pkg}" --dry-run
         else
-          echo "[publish-crates] astra-core not on crates.io yet; using cargo package for ${pkg}"
-          cargo package -p "${pkg}"
+          echo "[publish-crates] astra-core not on crates.io yet; using cargo check for ${pkg}"
+          cargo check -p "${pkg}"
         fi
         ;;
     esac
