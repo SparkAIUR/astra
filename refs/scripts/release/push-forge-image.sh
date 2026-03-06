@@ -13,17 +13,18 @@ if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 TAGS=(
-  "-t" "docker.io/halceon/astra:${TAG}"
-  "-t" "docker.io/nudevco/astra:${TAG}"
+  "-t" "docker.io/halceon/astra-forge:${TAG}"
+  "-t" "docker.io/halceon/astra-forge:latest"
 )
 
-echo "Pushing multi-arch image tags for ${TAG}:"
-echo "  - docker.io/halceon/astra:${TAG}"
-echo "  - docker.io/nudevco/astra:${TAG}"
+echo "Pushing multi-arch forge image tags for ${TAG}:"
+echo "  - docker.io/halceon/astra-forge:${TAG}"
+echo "  - docker.io/halceon/astra-forge:latest"
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
+  -f Dockerfile.forge \
   "${TAGS[@]}" \
   --push \
   .
 
-echo "Pushed multi-arch tags for ${TAG}"
+echo "Pushed forge image tags for ${TAG}"
