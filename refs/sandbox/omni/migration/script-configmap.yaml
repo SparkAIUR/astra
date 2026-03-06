@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: omni-migration-scripts
+data:
+  run-migration.sh: |
+    #!/bin/sh
+    set -eu
+
+    : "${ASTRA_ENDPOINT:?ASTRA_ENDPOINT is required}"
+    : "${KEYCLOAK_ISSUER:?KEYCLOAK_ISSUER is required}"
+    : "${KEYCLOAK_CLIENT_ID:?KEYCLOAK_CLIENT_ID is required}"
+    : "${KEYCLOAK_CLIENT_SECRET:?KEYCLOAK_CLIENT_SECRET is required}"
+    : "${SOURCES_FILE:=/config/sources.yaml}"
+    : "${RESULTS_FILE:=/work/results/results.json}"
+    : "${CHUNK_TARGET_BYTES:=67108864}"
+
+    TOKEN_ENDPOINT="${KEYCLOAK_ISSUER%/}/protocol/openid-connect/token"
+
+    fetch_token() {
+      curl --fail --silent --show-error --location \
+        --header 'content-type: application/x-www-form-urlencoded' \
+        --data-urlencode grant_type=client_credentials \
+        --data-urlencode client_id="${KEYCLOAK_CLIENT_ID}" \
+        --data-urlencode client_secret="${KEYCLOAK_CLIENT_SECRET}" \
+        ${KEYCLOAK_SCOPE:+--data-urlencode scope="${KEYCLOAK_SCOPE}"} \
+        "${TOKEN_ENDPOINT}" | jq -r '.access_token'
+    }
+
+    work_root=/work/run
+    downloads_dir="${work_root}/downloads"
+    bundles_dir="${work_root}/bundles"
+    results_lines="${work_root}/results.jsonl"
+    sources_json="${work_root}/sources.json"
+
+    mkdir -p "${downloads_dir}" "${bundles_dir}" "$(dirname "${RESULTS_FILE}")"
+    : > "${results_lines}"
+
+    python3 - <<'PY' "${SOURCES_FILE}" > "${sources_json}"
+    import json
+    import pathlib
+    import sys
+    import yaml
+
+    path = pathlib.Path(sys.argv[1])
+    payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    items = payload.get("sources") or []
+    if not isinstance(items, list):
+        raise SystemExit("sources must be a list")
+
+    normalized = []
+    for idx, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            raise SystemExit(f"sources[{idx}] must be a mapping")
+        name = str(item.get("name") or "").strip()
+        tenant_id = str(item.get("tenantId") or item.get("tenant_id") or "").strip()
+        snapshot_url = str(item.get("snapshotUrl") or item.get("snapshot_url") or "").strip()
+        sha256 = str(item.get("sha256") or "").strip()
+        allow_overwrite = bool(item.get("allowOverwrite", False))
+        if not name or not tenant_id or not snapshot_url:
+            raise SystemExit(f"sources[{idx}] requires name, tenantId, and snapshotUrl")
+        normalized.append(
+            {
+                "name": name,
+                "tenantId": tenant_id,
+                "snapshotUrl": snapshot_url,
+                "sha256": sha256,
+                "allowOverwrite": allow_overwrite,
+            }
+        )
+
+    print(json.dumps(normalized))
+    PY
+
+    if [ "$(jq 'length' "${sources_json}")" -eq 0 ]; then
+      echo "[omni-migration] no sources found" >&2
+      exit 1
+    fi
+
+    echo "[omni-migration] importing $(jq 'length' "${sources_json}") snapshot(s) into ${ASTRA_ENDPOINT}"
+
+    jq -c '.[]' "${sources_json}" | while IFS= read -r item; do
+      name=$(printf '%s' "${item}" | jq -r '.name')
+      tenant_id=$(printf '%s' "${item}" | jq -r '.tenantId')
+      snapshot_url=$(printf '%s' "${item}" | jq -r '.snapshotUrl')
+      sha256=$(printf '%s' "${item}" | jq -r '.sha256')
+      allow_overwrite=$(printf '%s' "${item}" | jq -r '.allowOverwrite')
+
+      snapshot_path="${downloads_dir}/${name}.snap"
+      bundle_dir="${bundles_dir}/${name}"
+      manifest_path="${bundle_dir}/manifest.json"
+
+      echo "[omni-migration] downloading ${name}"
+      curl --fail --silent --show-error --location --retry 5 --output "${snapshot_path}" "${snapshot_url}"
+
+      if [ -n "${sha256}" ]; then
+        printf '%s  %s\n' "${sha256}" "${snapshot_path}" | sha256sum -c -
+      fi
+
+      echo "[omni-migration] compiling ${name} for tenant=${tenant_id}"
+      astra-forge compile \
+        --input "${snapshot_path}" \
+        --input-format db-snapshot \
+        --out-dir "${bundle_dir}" \
+        --chunk-target-bytes "${CHUNK_TARGET_BYTES}"
+
+      bearer_token=$(fetch_token)
+      if [ -z "${bearer_token}" ] || [ "${bearer_token}" = "null" ]; then
+        echo "[omni-migration] failed to fetch Keycloak access token" >&2
+        exit 1
+      fi
+
+      set -- astra-forge bulk-load \
+        --endpoint "${ASTRA_ENDPOINT}" \
+        --manifest "${manifest_path}" \
+        --tenant-id "${tenant_id}" \
+        --wait \
+        --bearer-token "${bearer_token}"
+
+      if [ "${allow_overwrite}" = "true" ]; then
+        set -- "$@" --allow-overwrite
+      fi
+
+      echo "[omni-migration] bulk-loading ${name}"
+      "$@"
+
+      chunks=$(jq '.chunks | length' "${manifest_path}")
+      jq -n \
+        --arg name "${name}" \
+        --arg tenantId "${tenant_id}" \
+        --arg snapshotPath "${snapshot_path}" \
+        --arg manifestPath "${manifest_path}" \
+        --argjson allowOverwrite "${allow_overwrite}" \
+        --argjson chunks "${chunks}" \
+        '{name: $name, tenantId: $tenantId, snapshotPath: $snapshotPath, manifestPath: $manifestPath, chunks: $chunks, allowOverwrite: $allowOverwrite}' \
+        >> "${results_lines}"
+    done
+
+    jq -s '.' "${results_lines}" > "${RESULTS_FILE}"
+    cat "${RESULTS_FILE}"

@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: omni-tenant-a-etcd-key
+  namespace: sidero
+type: Opaque
+stringData:
+  omni.asc: |
+    -----BEGIN PGP PRIVATE KEY BLOCK-----
+    replace-me
+    -----END PGP PRIVATE KEY BLOCK-----

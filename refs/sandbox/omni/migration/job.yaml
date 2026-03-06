@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: omni-snapshot-import
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: importer
+          image: docker.io/halceon/astra-forge:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - /scripts/run-migration.sh
+          env:
+            - name: ASTRA_ENDPOINT
+              value: http://astra-client.sidero.svc.cluster.local:2379
+            - name: KEYCLOAK_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: omni-migration-keycloak
+                  key: issuer
+            - name: KEYCLOAK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: omni-migration-keycloak
+                  key: client-id
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: omni-migration-keycloak
+                  key: client-secret
+            - name: KEYCLOAK_SCOPE
+              valueFrom:
+                secretKeyRef:
+                  name: omni-migration-keycloak
+                  key: scope
+                  optional: true
+            - name: SOURCES_FILE
+              value: /config/sources.yaml
+            - name: RESULTS_FILE
+              value: /work/results/results.json
+            - name: CHUNK_TARGET_BYTES
+              value: "67108864"
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            - name: sources
+              mountPath: /config
+              readOnly: true
+            - name: workdir
+              mountPath: /work
+      volumes:
+        - name: scripts
+          configMap:
+            name: omni-migration-scripts
+            defaultMode: 0555
+        - name: sources
+          secret:
+            secretName: omni-migration-sources
+        - name: workdir
+          emptyDir: {}

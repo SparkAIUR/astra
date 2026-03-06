@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tenant-a-astra-proxy-oidc
+  namespace: sidero
+type: Opaque
+stringData:
+  ASTRA_PROXY_ISSUER: https://keycloak.example.net/realms/omni
+  ASTRA_PROXY_CLIENT_ID: omni-tenant-a-astra
+  ASTRA_PROXY_CLIENT_SECRET: REPLACE_WITH_TENANT_A_ASTRA_SECRET
+  ASTRA_PROXY_SCOPE: openid
+  ASTRA_PROXY_REFRESH_SKEW_SECS: "60"
+  ASTRA_PROXY_REFRESH_BACKOFF_SECS: "5"
+  ASTRA_PROXY_MAX_MESSAGE_BYTES: "67108864"

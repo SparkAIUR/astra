@@ -1,0 +1,85 @@
+fullnameOverride: tenant-a
+
+etcdEncryptionKey:
+  existingSecret: tenant-a-etcd-key
+
+config:
+  account:
+    name: tenant-a
+    id: 11111111-1111-1111-1111-111111111111
+  auth:
+    initialUsers:
+      - admin@example.net
+    oidc:
+      enabled: true
+      providerURL: https://keycloak.example.net/realms/omni
+      clientID: omni-tenant-a-ui
+      clientSecret: REPLACE_WITH_OMNI_UI_CLIENT_SECRET
+      logoutURL: https://keycloak.example.net/realms/omni/protocol/openid-connect/logout
+      scopes:
+        - openid
+        - profile
+        - email
+        - groups
+  services:
+    api:
+      advertisedURL: https://tenant-a.omni.example.net
+    kubernetesProxy:
+      advertisedURL: https://tenant-a.kube.omni.example.net
+    machineAPI:
+      advertisedURL: https://tenant-a.siderolink.omni.example.net
+    siderolink:
+      wireGuard:
+        advertisedEndpoint: 203.0.113.10:50180
+    workloadProxy:
+      enabled: true
+      subdomain: proxy
+
+ingress:
+  main:
+    enabled: true
+    host: tenant-a.omni.example.net
+    tls:
+      - secretName: tenant-a-omni-ui-tls
+        hosts:
+          - tenant-a.omni.example.net
+  kubernetesProxy:
+    enabled: true
+    host: tenant-a.kube.omni.example.net
+    tls:
+      - secretName: tenant-a-omni-kube-tls
+        hosts:
+          - tenant-a.kube.omni.example.net
+  siderolinkApi:
+    enabled: true
+    host: tenant-a.siderolink.omni.example.net
+    tls:
+      - secretName: tenant-a-omni-siderolink-tls
+        hosts:
+          - tenant-a.siderolink.omni.example.net
+
+service:
+  wireguard:
+    type: LoadBalancer
+    port: 50180
+
+extraContainers:
+  - name: astra-auth-proxy
+    image: docker.io/halceon/astra:latest
+    imagePullPolicy: IfNotPresent
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        exec astractl oidc-proxy \
+          --listen-addr 0.0.0.0:23790 \
+          --upstream http://astra-0.astra-peer.sidero.svc.cluster.local:2379 \
+          --upstream http://astra-1.astra-peer.sidero.svc.cluster.local:2379 \
+          --upstream http://astra-2.astra-peer.sidero.svc.cluster.local:2379
+    envFrom:
+      - secretRef:
+          name: tenant-a-astra-proxy-oidc
+    ports:
+      - name: astra-etcd
+        containerPort: 23790
+        protocol: TCP

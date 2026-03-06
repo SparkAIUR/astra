@@ -1,0 +1,23 @@
+replicaCount: 1
+
+config:
+  features:
+    enableClusterImport: true
+  storage:
+    default:
+      kind: etcd
+      etcd:
+        embedded: false
+        endpoints:
+          - http://127.0.0.1:23790
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+metrics:
+  enabled: true

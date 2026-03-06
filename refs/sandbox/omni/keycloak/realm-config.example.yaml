@@ -1,0 +1,45 @@
+keycloak:
+  base_url: https://keycloak.example.net
+  admin_realm: master
+  realm: omni
+  admin_client_id: admin-cli
+  admin_username: KEYCLOAK_ADMIN_USERNAME
+  admin_password: KEYCLOAK_ADMIN_PASSWORD
+  verify_tls: true
+
+astra:
+  namespace: sidero
+  audience: astra
+  tenant_claim: tenant_id
+  issuer: https://keycloak.example.net/realms/omni
+  jwks_url: https://keycloak.example.net/realms/omni/protocol/openid-connect/certs
+
+omni:
+  namespace: sidero
+  initial_admin_email: admin@example.net
+  host_patterns:
+    ui: https://{tenant}.omni.example.net
+    kube: https://{tenant}.kube.omni.example.net
+    siderolink: https://{tenant}.siderolink.omni.example.net
+    grpc: https://{tenant}.grpc.omni.example.net
+    workload_proxy_parent: proxy.omni.example.net
+
+migrator:
+  client_id: astra-migrator
+  client_secret: REPLACE_WITH_MIGRATOR_CLIENT_SECRET
+  tenant_id: ops
+
+tenants:
+  - id: tenant-a
+    display_name: Tenant A
+    account_id: 11111111-1111-1111-1111-111111111111
+    ui_client_id: omni-tenant-a-ui
+    ui_client_secret: REPLACE_WITH_TENANT_A_UI_SECRET
+    astra_client_id: omni-tenant-a-astra
+    astra_client_secret: REPLACE_WITH_TENANT_A_ASTRA_SECRET
+    urls:
+      main: https://tenant-a.omni.example.net
+      kube: https://tenant-a.kube.omni.example.net
+      siderolink: https://tenant-a.siderolink.omni.example.net
+      grpc: https://tenant-a.grpc.omni.example.net
+      workload_proxy_parent: proxy.omni.example.net

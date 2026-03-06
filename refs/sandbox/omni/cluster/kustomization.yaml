@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sidero
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: omni-astra
+resources:
+  - namespace.yaml
+  - astra-peer-service.yaml
+  - astra-client-service.yaml
+  - astra-metrics-service.yaml
+  - astra-pdb.yaml
+  - astra-statefulset.yaml
+images:
+  - name: docker.io/halceon/astra-alpha
+    newTag: latest

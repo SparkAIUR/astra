@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: astra
+spec:
+  serviceName: astra-peer
+  replicas: 3
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: astra
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: astra
+    spec:
+      terminationGracePeriodSeconds: 120
+      containers:
+        - name: astrad
+          image: docker.io/halceon/astra-alpha
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              ordinal="${HOSTNAME##*-}"
+              node_id=$((ordinal + 1))
+              export ASTRAD_RAFT_ADVERTISE_ADDR="${HOSTNAME}.astra-peer.${POD_NAMESPACE}.svc.cluster.local:2380"
+              exec astrad \
+                --node-id="${node_id}" \
+                --peers="http://astra-0.astra-peer.${POD_NAMESPACE}.svc.cluster.local:2380,http://astra-1.astra-peer.${POD_NAMESPACE}.svc.cluster.local:2380,http://astra-2.astra-peer.${POD_NAMESPACE}.svc.cluster.local:2380"
+          ports:
+            - name: client
+              containerPort: 2379
+            - name: raft
+              containerPort: 2380
+            - name: metrics
+              containerPort: 9479
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ASTRAD_CLIENT_ADDR
+              value: 0.0.0.0:2379
+            - name: ASTRAD_RAFT_ADDR
+              value: 0.0.0.0:2380
+            - name: ASTRAD_DATA_DIR
+              value: /var/lib/astra
+            - name: ASTRAD_PROFILE
+              value: omni
+            - name: ASTRAD_METRICS_ENABLED
+              value: "true"
+            - name: ASTRAD_METRICS_ADDR
+              value: 0.0.0.0:9479
+            - name: ASTRAD_AUTH_ENABLED
+              value: "true"
+            - name: ASTRAD_AUTH_JWKS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: astra-oidc
+                  key: jwks-url
+            - name: ASTRAD_AUTH_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: astra-oidc
+                  key: issuer
+            - name: ASTRAD_AUTH_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: astra-oidc
+                  key: audience
+                  optional: true
+            - name: ASTRAD_AUTH_TENANT_CLAIM
+              value: tenant_id
+            - name: ASTRAD_TENANT_VIRTUALIZATION_ENABLED
+              value: "true"
+            - name: ASTRAD_GRPC_MAX_DECODING_MESSAGE_BYTES
+              value: "67108864"
+            - name: ASTRAD_GRPC_MAX_ENCODING_MESSAGE_BYTES
+              value: "67108864"
+            - name: ASTRAD_PUT_DISPATCH_CONCURRENCY
+              value: "1"
+            - name: ASTRAD_QOS_TIER0_PREFIXES
+              value: /registry/leases/,/omni/locks/
+            - name: ASTRAD_QOS_TIER0_SUFFIXES
+              value: /leader,/lock
+          readinessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/astra
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 64Gi

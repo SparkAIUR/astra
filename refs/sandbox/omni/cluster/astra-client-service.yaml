@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: astra-client
+spec:
+  selector:
+    app.kubernetes.io/name: astra
+  ports:
+    - name: client
+      port: 2379
+      targetPort: client
