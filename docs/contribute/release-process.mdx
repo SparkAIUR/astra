@@ -1,0 +1,82 @@
+---
+title: Release Process
+summary: Public runbook for cutting Astra prereleases and stable releases from the primary repository.
+audience: both
+status: canonical
+last_verified: 2026-03-06
+source_of_truth:
+  - CHANGELOG.md
+  - .github/workflows/release.yml
+  - refs/scripts/release/publish-crates.sh
+related_artifacts:
+  - /contribute/contributing
+  - /research/benchmark-results
+---
+
+# Release Process
+
+## Scope
+Use this runbook when cutting Astra prereleases and stable releases from `github.com/SparkAIUR/astra`.
+
+## Preconditions
+- `main` is green on `rust-ci`, `docs-ci`, `docs-pages`, `crates-dry-run`, and `scripts-ci`.
+- `CHANGELOG.md` is updated for the target version.
+- Docker Hub repository secrets are configured in GitHub Actions:
+  - `DOCKERHUB_USERNAME`
+  - `DOCKERHUB_TOKEN`
+- crates.io trusted publishing is configured for the crates in this repository.
+- Local validation has passed:
+  - `cargo check --workspace`
+  - `make scripts-test`
+  - `make docs-check`
+
+## Versioning policy
+- Prerelease tags use `vX.Y.Z-rcN`.
+- Stable tags use `vX.Y.Z`.
+- Only stable tags promote Docker `:latest` aliases.
+- Prerelease tags publish versioned images and crates only.
+
+## Local preparation
+```bash
+cargo fmt --all
+cargo check --workspace
+make scripts-test
+make docs-check
+```
+
+## Tag and push
+```bash
+git tag -a v0.1.1-rc1 -m "v0.1.1-rc1"
+git push origin main --tags
+```
+
+## What the release workflow does
+1. Verifies formatting, clippy, tests, and crate publish dry-runs.
+2. Publishes crates using crates.io trusted publishing.
+3. Builds and pushes multi-arch images for `halceon/astra`, `nudevco/astra`, and `halceon/astra-forge`.
+4. Creates or updates the GitHub release.
+
+## RC behavior
+- `vX.Y.Z-rcN` publishes only versioned image tags.
+- `:latest` is intentionally not touched by RC tags.
+- GitHub release is marked as a prerelease.
+
+## Stable behavior
+- `vX.Y.Z` publishes versioned tags and also updates `:latest`.
+- GitHub release is not marked prerelease.
+
+## Rollback guidance
+- If crate publication already happened, do not reuse the same version.
+- If image publication failed before completion, fix credentials or workflow config and rerun the workflow for the same tag.
+- If a bad stable image reached `:latest`, publish a corrective stable tag; do not retag the broken release silently.
+
+## Post-release checks
+```bash
+gh run list -R SparkAIUR/astra --limit 20
+gh run watch <run-id> -R SparkAIUR/astra
+gh run view <run-id> -R SparkAIUR/astra --log-failed
+```
+
+## Related artifacts
+- Root changelog: `CHANGELOG.md`
+- Public benchmark summary: `BENCHMARKS.md`

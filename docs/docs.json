@@ -90,6 +90,7 @@
       "group": "Contributing",
       "pages": [
         "contribute/contributing",
+        "contribute/release-process",
         "contribute/docs-style-guide",
         "contribute/docs-source-of-truth",
         "contribute/adr-index"

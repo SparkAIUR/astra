@@ -1,4 +1,4 @@
-generated_at: '2026-03-06T03:31:44Z'
+generated_at: '2026-03-06T04:40:53Z'
 docs_root: docs
 entries:
 - page: /architecture
@@ -151,6 +151,18 @@ entries:
   - docs/.meta/source-map.yaml
   related_artifacts:
   - refs/scripts/docs/validate_docs.py
+- page: /contribute/release-process
+  file: docs/contribute/release-process.mdx
+  title: Release Process
+  status: canonical
+  last_verified: 2026-03-06
+  source_of_truth:
+  - CHANGELOG.md
+  - .github/workflows/release.yml
+  - refs/scripts/release/publish-crates.sh
+  related_artifacts:
+  - /contribute/contributing
+  - /research/benchmark-results
 - page: /deployment
   file: docs/deployment.mdx
   title: Deployment Overview
