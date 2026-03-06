@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::Debug;
 use std::io::{Cursor, Read};
 use std::ops::{Bound, RangeBounds};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -296,6 +296,9 @@ pub struct WalBatchConfig {
     pub channel_capacity: usize,
     pub pending_limit: usize,
     pub segment_bytes: u64,
+    pub checkpoint_enabled: bool,
+    pub checkpoint_trigger_bytes: u64,
+    pub checkpoint_min_interval: Duration,
     pub io_engine: WalIoEngine,
 }
 
@@ -310,6 +313,9 @@ impl Default for WalBatchConfig {
             channel_capacity: 8_192,
             pending_limit: 2_000,
             segment_bytes: 64 * 1024 * 1024,
+            checkpoint_enabled: false,
+            checkpoint_trigger_bytes: 512 * 1024 * 1024,
+            checkpoint_min_interval: Duration::from_secs(300),
             io_engine: WalIoEngine::Auto,
         }
     }
@@ -327,12 +333,14 @@ impl RaftBootstrap {
             election_timeout_min: cfg.raft_election_timeout_min_ms,
             election_timeout_max: cfg.raft_election_timeout_max_ms,
             heartbeat_interval: cfg.raft_heartbeat_interval_ms,
-            snapshot_max_chunk_size: 2 * 1024 * 1024,
+            snapshot_max_chunk_size: cfg.raft_snapshot_max_chunk_bytes,
             max_payload_entries: cfg.raft_max_payload_entries,
-            snapshot_policy: openraft::SnapshotPolicy::LogsSinceLast(512),
+            snapshot_policy: openraft::SnapshotPolicy::LogsSinceLast(
+                cfg.raft_snapshot_policy_logs_since_last,
+            ),
             replication_lag_threshold: cfg.raft_replication_lag_threshold,
-            max_in_snapshot_log_to_keep: 64,
-            purge_batch_size: 256,
+            max_in_snapshot_log_to_keep: cfg.raft_max_in_snapshot_log_to_keep,
+            purge_batch_size: cfg.raft_purge_batch_size,
             ..Default::default()
         };
 
@@ -363,7 +371,7 @@ enum DurableRecord {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct LogStoreState {
     logs: BTreeMap<u64, Entry<AstraTypeConfig>>,
     last_purged_log_id: Option<LogId<u64>>,
@@ -525,6 +533,14 @@ impl PosixBlockDevice {
             self.file.sync_data()
         }
     }
+
+    fn logical_bytes(&self) -> u64 {
+        self.offset
+    }
+
+    fn allocated_bytes(&self) -> u64 {
+        self.allocated
+    }
 }
 
 #[derive(Debug)]
@@ -560,6 +576,43 @@ impl WalDevice {
             WalDevice::Posix(d) => d.sync_data(),
         }
     }
+
+    fn logical_bytes(&self) -> u64 {
+        match self {
+            WalDevice::Posix(d) => d.logical_bytes(),
+        }
+    }
+
+    fn allocated_bytes(&self) -> u64 {
+        match self {
+            WalDevice::Posix(d) => d.allocated_bytes(),
+        }
+    }
+}
+
+fn rewrite_wal_checkpoint(
+    path: &Path,
+    state: &LogStoreState,
+    cfg: &WalBatchConfig,
+) -> std::io::Result<(WalDevice, u64, u64)> {
+    let records = durable_records_from_state(state);
+    let payload = encode_durable_records(records)?;
+    let tmp_path = path.with_extension("wal.checkpoint.tmp");
+    let _ = std::fs::remove_file(&tmp_path);
+
+    let logical_bytes = {
+        let mut device = PosixBlockDevice::open(&tmp_path, 0, cfg.segment_bytes)?;
+        if !payload.is_empty() {
+            device.append_payload(&payload)?;
+        }
+        device.sync_data()?;
+        device.logical_bytes()
+    };
+
+    std::fs::rename(&tmp_path, path)?;
+    let (device, _) = WalDevice::open(path, logical_bytes, cfg)?;
+    let allocated_bytes = device.allocated_bytes();
+    Ok((device, logical_bytes, allocated_bytes))
 }
 
 enum WalWriteCompletion {
@@ -608,16 +661,19 @@ struct WalQueueState {
     queue: VecDeque<WalQueueItem>,
     queued_bytes: usize,
     flushing: bool,
+    checkpointing: bool,
 }
 
 pub struct AstraLogStore {
     inner: Arc<RwLock<LogStoreState>>,
+    wal_path: PathBuf,
     wal_device: Arc<Mutex<WalDevice>>,
     wal_cfg: WalBatchConfig,
     wal_queue: Arc<AsyncMutex<WalQueueState>>,
     wal_queue_space: Arc<Notify>,
     last_flushed_committed: Option<LogId<u64>>,
     last_committed_flush_at: Instant,
+    last_checkpoint_at: Option<Instant>,
     timeline_by_log_index: BTreeMap<u64, TimelineMarker>,
 }
 
@@ -705,22 +761,134 @@ impl AstraLogStore {
 
         let store = Self {
             inner,
+            wal_path,
             wal_device: Arc::new(Mutex::new(device)),
             wal_cfg: cfg,
             wal_queue: Arc::new(AsyncMutex::new(WalQueueState::default())),
             wal_queue_space: Arc::new(Notify::new()),
             last_flushed_committed,
             last_committed_flush_at: Instant::now(),
+            last_checkpoint_at: None,
             timeline_by_log_index,
         };
         metrics::set_wal_queue_depth(0);
         metrics::set_wal_queue_bytes(0);
+        if let Ok(wal_device) = store.wal_device.lock() {
+            metrics::set_wal_logical_bytes(wal_device.logical_bytes());
+            metrics::set_wal_allocated_bytes(wal_device.allocated_bytes());
+        }
         Ok(store)
     }
 
     pub async fn wal_queue_snapshot(&self) -> (usize, usize) {
         let guard = self.wal_queue.lock().await;
         (guard.queue.len(), guard.queued_bytes)
+    }
+
+    async fn begin_checkpoint(&self) {
+        loop {
+            let mut guard = self.wal_queue.lock().await;
+            if !guard.checkpointing && !guard.flushing && guard.queue.is_empty() {
+                guard.checkpointing = true;
+                return;
+            }
+            drop(guard);
+            self.wal_queue_space.notified().await;
+        }
+    }
+
+    async fn end_checkpoint(&self) {
+        let mut guard = self.wal_queue.lock().await;
+        guard.checkpointing = false;
+        drop(guard);
+        self.wal_queue_space.notify_waiters();
+    }
+
+    async fn maybe_checkpoint_after_purge(&mut self) -> Result<(), StorageError<u64>> {
+        if !self.wal_cfg.checkpoint_enabled {
+            return Ok(());
+        }
+        if let Some(last) = self.last_checkpoint_at {
+            if last.elapsed() < self.wal_cfg.checkpoint_min_interval {
+                return Ok(());
+            }
+        }
+
+        let (logical_before, allocated_before) = {
+            let wal_device = self.wal_device.lock().map_err(|_| {
+                StorageError::from_io_error(
+                    openraft::ErrorSubject::Store,
+                    openraft::ErrorVerb::Write,
+                    std::io::Error::other("wal device lock poisoned"),
+                )
+            })?;
+            (wal_device.logical_bytes(), wal_device.allocated_bytes())
+        };
+
+        if logical_before < self.wal_cfg.checkpoint_trigger_bytes
+            && allocated_before < self.wal_cfg.checkpoint_trigger_bytes
+        {
+            return Ok(());
+        }
+
+        self.begin_checkpoint().await;
+        let checkpoint_result = async {
+            let state = { self.inner.read().await.clone() };
+            let wal_cfg = self.wal_cfg.clone();
+            let wal_path = self.wal_path.clone();
+            let started = Instant::now();
+            let rewritten = tokio::task::spawn_blocking(move || {
+                rewrite_wal_checkpoint(&wal_path, &state, &wal_cfg)
+            })
+            .await
+            .map_err(|err| {
+                StorageError::from_io_error(
+                    openraft::ErrorSubject::Store,
+                    openraft::ErrorVerb::Write,
+                    std::io::Error::other(format!("wal checkpoint worker join error: {err}")),
+                )
+            })?
+            .map_err(|err| {
+                StorageError::from_io_error(
+                    openraft::ErrorSubject::Store,
+                    openraft::ErrorVerb::Write,
+                    err,
+                )
+            })?;
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            let (device, logical_after, allocated_after) = rewritten;
+            {
+                let mut wal_device = self.wal_device.lock().map_err(|_| {
+                    StorageError::from_io_error(
+                        openraft::ErrorSubject::Store,
+                        openraft::ErrorVerb::Write,
+                        std::io::Error::other("wal device lock poisoned"),
+                    )
+                })?;
+                *wal_device = device;
+            }
+            metrics::inc_wal_checkpoint_total();
+            metrics::observe_wal_checkpoint_ms(elapsed_ms);
+            metrics::add_wal_checkpoint_reclaimed_bytes(
+                allocated_before.saturating_sub(allocated_after),
+            );
+            metrics::set_wal_logical_bytes(logical_after);
+            metrics::set_wal_allocated_bytes(allocated_after);
+            self.last_checkpoint_at = Some(Instant::now());
+            info!(
+                logical_before,
+                logical_after,
+                allocated_before,
+                allocated_after,
+                reclaimed_bytes = allocated_before.saturating_sub(allocated_after),
+                elapsed_ms,
+                "wal checkpoint compaction complete"
+            );
+            Ok(())
+        }
+        .await;
+        self.end_checkpoint().await;
+        checkpoint_result
     }
 
     fn encode_records_payload(records: Vec<DurableRecord>) -> Result<Vec<u8>, StorageError<u64>> {
@@ -905,13 +1073,13 @@ impl AstraLogStore {
                 let started = Instant::now();
                 let io_result = tokio::task::spawn_blocking({
                     let wal_device = wal_device.clone();
-                    move || -> std::io::Result<()> {
+                    move || -> std::io::Result<(u64, u64)> {
                         let mut wal_device = wal_device
                             .lock()
                             .map_err(|_| std::io::Error::other("wal device lock poisoned"))?;
                         wal_device.append_payload(&payload)?;
                         wal_device.sync_data()?;
-                        Ok(())
+                        Ok((wal_device.logical_bytes(), wal_device.allocated_bytes()))
                     }
                 })
                 .await;
@@ -926,10 +1094,12 @@ impl AstraLogStore {
                 };
 
                 match flush_outcome {
-                    Ok(()) => {
+                    Ok((logical_bytes, allocated_bytes)) => {
                         let since_submit_ms = timeline_submit_ts_micros
                             .and_then(|submit| now_micros().checked_sub(submit))
                             .map(|delta| delta / 1_000);
+                        metrics::set_wal_logical_bytes(logical_bytes);
+                        metrics::set_wal_allocated_bytes(allocated_bytes);
                         if append_entries >= 50 {
                             info!(
                                 requests,
@@ -1003,7 +1173,7 @@ impl AstraLogStore {
             let mut start_worker = false;
             {
                 let mut guard = self.wal_queue.lock().await;
-                if guard.queue.len() < pending_limit {
+                if !guard.checkpointing && guard.queue.len() < pending_limit {
                     let item = maybe_item.take().expect("wal queue item available");
                     guard.queued_bytes = guard.queued_bytes.saturating_add(payload_len);
                     guard.queue.push_back(item);
@@ -1181,6 +1351,25 @@ fn apply_durable_record(state: &mut LogStoreState, rec: DurableRecord) {
             state.committed = committed;
         }
     }
+}
+
+fn durable_records_from_state(state: &LogStoreState) -> Vec<DurableRecord> {
+    let mut records = Vec::new();
+    if !state.logs.is_empty() {
+        records.push(DurableRecord::Append {
+            entries: state.logs.values().cloned().collect(),
+        });
+    }
+    if let Some(upto) = state.last_purged_log_id.clone() {
+        records.push(DurableRecord::Purge { upto });
+    }
+    if let Some(vote) = state.vote.clone() {
+        records.push(DurableRecord::Vote { vote });
+    }
+    records.push(DurableRecord::Committed {
+        committed: state.committed.clone(),
+    });
+    records
 }
 
 fn encode_durable_records(records: Vec<DurableRecord>) -> std::io::Result<Vec<u8>> {
@@ -1435,7 +1624,8 @@ impl RaftLogStorage<AstraTypeConfig> for AstraLogStore {
         self.timeline_by_log_index = self.timeline_by_log_index.split_off(&keep_from);
 
         self.append_records(vec![DurableRecord::Purge { upto: log_id }], 0)
-            .await
+            .await?;
+        self.maybe_checkpoint_after_purge().await
     }
 }
 
@@ -1695,6 +1885,7 @@ pub struct AstraSnapshotBuilder {
 
 impl RaftSnapshotBuilder<AstraTypeConfig> for AstraSnapshotBuilder {
     async fn build_snapshot(&mut self) -> Result<Snapshot<AstraTypeConfig>, StorageError<u64>> {
+        let started = Instant::now();
         let (snapshot_state, token_dict, token_dict_epoch, last_log_id, last_membership) = {
             let guard = self.shared.read().await;
             (
@@ -1719,6 +1910,8 @@ impl RaftSnapshotBuilder<AstraTypeConfig> for AstraSnapshotBuilder {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
             )
         })?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        metrics::observe_raft_snapshot_build_ms(elapsed_ms);
 
         let snapshot_id = format!(
             "snapshot-{}-{}",
@@ -1734,6 +1927,13 @@ impl RaftSnapshotBuilder<AstraTypeConfig> for AstraSnapshotBuilder {
             last_membership: last_membership.clone(),
             snapshot_id,
         };
+        info!(
+            stage = "snapshot_build_done",
+            last_log_index = meta.last_log_id.as_ref().map(|v| v.index),
+            payload_bytes = bytes.len(),
+            elapsed_ms,
+            "raft timeline"
+        );
 
         {
             let mut guard = self.shared.write().await;
@@ -2113,9 +2313,11 @@ impl RaftStateMachine<AstraTypeConfig> for AstraStateMachine {
         meta: &SnapshotMeta<u64, BasicNode>,
         snapshot: Box<Cursor<Vec<u8>>>,
     ) -> Result<(), StorageError<u64>> {
+        let started = Instant::now();
         let cursor = *snapshot;
         let bytes = cursor.into_inner();
 
+        let deserialize_started = Instant::now();
         let (snapshot_state, token_dict, token_dict_epoch) =
             match bincode::deserialize::<SnapshotPayloadV2>(&bytes) {
                 Ok(v2) => (
@@ -2136,12 +2338,15 @@ impl RaftStateMachine<AstraTypeConfig> for AstraStateMachine {
                     (snapshot_state, HashMap::new(), 0)
                 }
             };
+        let deserialize_elapsed_ms = deserialize_started.elapsed().as_millis() as u64;
+        metrics::observe_raft_snapshot_install_deserialize_ms(deserialize_elapsed_ms);
 
         let store = {
             let guard = self.shared.read().await;
             guard.store.clone()
         };
 
+        let load_started = Instant::now();
         store.load_snapshot_state(snapshot_state).map_err(|e| {
             StorageError::from_io_error(
                 openraft::ErrorSubject::StateMachine,
@@ -2149,17 +2354,30 @@ impl RaftStateMachine<AstraTypeConfig> for AstraStateMachine {
                 std::io::Error::other(e.to_string()),
             )
         })?;
+        let load_elapsed_ms = load_started.elapsed().as_millis() as u64;
+        metrics::observe_raft_snapshot_install_load_ms(load_elapsed_ms);
 
         let mut guard = self.shared.write().await;
         guard.last_applied_log = meta.last_log_id.clone();
         guard.last_membership = meta.last_membership.clone();
         guard.token_dict = token_dict;
         guard.token_dict_epoch = token_dict_epoch;
+        let payload_bytes = bytes.len();
         guard.current_snapshot = Some(SnapshotBlob {
             meta: meta.clone(),
             bytes,
         });
 
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        info!(
+            stage = "snapshot_install_state_done",
+            last_log_index = meta.last_log_id.as_ref().map(|v| v.index),
+            payload_bytes,
+            deserialize_elapsed_ms,
+            load_elapsed_ms,
+            elapsed_ms,
+            "raft timeline"
+        );
         Ok(())
     }
 
@@ -2179,6 +2397,7 @@ pub struct AstraNetworkFactory;
 
 #[derive(Debug, Clone)]
 pub struct AstraNetwork {
+    target_id: u64,
     addr: String,
     client: Option<InternalRaftClient<Channel>>,
 }
@@ -2186,8 +2405,9 @@ pub struct AstraNetwork {
 impl RaftNetworkFactory<AstraTypeConfig> for AstraNetworkFactory {
     type Network = AstraNetwork;
 
-    async fn new_client(&mut self, _target: u64, node: &BasicNode) -> Self::Network {
+    async fn new_client(&mut self, target: u64, node: &BasicNode) -> Self::Network {
         Self::Network {
+            target_id: target,
             addr: node.addr.clone(),
             client: None,
         }
@@ -2252,8 +2472,10 @@ impl RaftNetwork<AstraTypeConfig> for AstraNetwork {
             match resp {
                 Ok(resp) => {
                     let elapsed_ms = started.elapsed().as_millis() as u64;
+                    metrics::observe_raft_append_rpc_client_ms(elapsed_ms);
                     debug!(
                         stage = "append_entries_rpc_send_done",
+                        target_id = self.target_id,
                         entry_count,
                         first_log_index,
                         last_log_index,
@@ -2271,8 +2493,11 @@ impl RaftNetwork<AstraTypeConfig> for AstraNetwork {
                 }
                 Err(status) => {
                     let elapsed_ms = started.elapsed().as_millis() as u64;
+                    metrics::observe_raft_append_rpc_client_ms(elapsed_ms);
+                    metrics::inc_raft_append_rpc_failures_total();
                     debug!(
                         stage = "append_entries_rpc_send_done",
+                        target_id = self.target_id,
                         entry_count,
                         first_log_index,
                         last_log_index,
@@ -2287,6 +2512,17 @@ impl RaftNetwork<AstraTypeConfig> for AstraNetwork {
                     if attempt == 0 && Self::should_retry_status(&status) {
                         continue;
                     }
+                    warn!(
+                        stage = "append_entries_rpc_failed",
+                        target_id = self.target_id,
+                        entry_count,
+                        first_log_index,
+                        last_log_index,
+                        elapsed_ms,
+                        attempt,
+                        code = %status.code(),
+                        "raft timeline"
+                    );
                     return Err(RPCError::Network(NetworkError::new(&status)));
                 }
             }
@@ -2308,9 +2544,12 @@ impl RaftNetwork<AstraTypeConfig> for AstraNetwork {
         let payload = serde_json::to_vec(&rpc).map_err(|e| {
             RPCError::Network(NetworkError::new(&std::io::Error::other(e.to_string())))
         })?;
+        let payload_bytes = payload.len();
+        let last_log_index = rpc.meta.last_log_id.as_ref().map(|v| v.index);
 
         let timeout = option.hard_ttl();
         for attempt in 0..2 {
+            let started = Instant::now();
             let mut req = Request::new(RaftBytes {
                 payload: payload.clone(),
             });
@@ -2324,6 +2563,17 @@ impl RaftNetwork<AstraTypeConfig> for AstraNetwork {
 
             match resp {
                 Ok(resp) => {
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    metrics::observe_raft_install_snapshot_rpc_client_ms(elapsed_ms);
+                    info!(
+                        stage = "install_snapshot_rpc_send_done",
+                        target_id = self.target_id,
+                        last_log_index,
+                        payload_bytes,
+                        elapsed_ms,
+                        attempt,
+                        "raft timeline"
+                    );
                     return serde_json::from_slice::<InstallSnapshotResponse<u64>>(
                         &resp.into_inner().payload,
                     )
@@ -2332,10 +2582,23 @@ impl RaftNetwork<AstraTypeConfig> for AstraNetwork {
                     });
                 }
                 Err(status) => {
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    metrics::observe_raft_install_snapshot_rpc_client_ms(elapsed_ms);
+                    metrics::inc_raft_install_snapshot_rpc_failures_total();
                     self.invalidate_client();
                     if attempt == 0 && Self::should_retry_status(&status) {
                         continue;
                     }
+                    warn!(
+                        stage = "install_snapshot_rpc_failed",
+                        target_id = self.target_id,
+                        last_log_index,
+                        payload_bytes,
+                        elapsed_ms,
+                        attempt,
+                        code = %status.code(),
+                        "raft timeline"
+                    );
                     return Err(RPCError::Network(NetworkError::new(&status)));
                 }
             }
@@ -2466,9 +2729,15 @@ impl InternalRaft for AstraRaftService {
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
         let elapsed_ms = started.elapsed().as_millis() as u64;
+        metrics::observe_raft_append_rpc_server_ms(elapsed_ms);
         debug!(
             stage = "append_entries_rpc_recv_done",
-            entry_count, first_log_index, last_log_index, elapsed_ms, "raft timeline"
+            node_id = self.node_id,
+            entry_count,
+            first_log_index,
+            last_log_index,
+            elapsed_ms,
+            "raft timeline"
         );
 
         let payload = serde_json::to_vec(&resp).map_err(|e| Status::internal(e.to_string()))?;
@@ -2493,15 +2762,26 @@ impl InternalRaft for AstraRaftService {
         &self,
         request: Request<RaftBytes>,
     ) -> Result<Response<RaftBytes>, Status> {
+        let started = Instant::now();
         let rpc: InstallSnapshotRequest<AstraTypeConfig> =
             serde_json::from_slice(&request.into_inner().payload)
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
+        let last_log_index = rpc.meta.last_log_id.as_ref().map(|v| v.index);
 
         let resp = self
             .raft
             .install_snapshot(rpc)
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        metrics::observe_raft_install_snapshot_rpc_server_ms(elapsed_ms);
+        info!(
+            stage = "install_snapshot_rpc_recv_done",
+            node_id = self.node_id,
+            last_log_index,
+            elapsed_ms,
+            "raft timeline"
+        );
 
         let payload = serde_json::to_vec(&resp).map_err(|e| Status::internal(e.to_string()))?;
         Ok(Response::new(RaftBytes { payload }))

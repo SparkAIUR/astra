@@ -20,6 +20,7 @@ clap.workspace = true
 crc32c.workspace = true
 futures.workspace = true
 jsonwebtoken.workspace = true
+libc.workspace = true
 openraft.workspace = true
 reqwest.workspace = true
 serde.workspace = true

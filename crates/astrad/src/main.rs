@@ -6,7 +6,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, bail, Context, Result};
-use astra_core::config::{AstraConfig, AstraProfile, PutAdaptiveMode, S3Config};
+use astra_core::config::{
+    AstraConfig, AstraProfile, LargeValueMode, PutAdaptiveMode, S3Config, WatchAcceptRole,
+    WatchLaggedPolicy,
+};
 use astra_core::errors::StoreError;
 use astra_core::hal::HalProfile;
 use astra_core::io_budget::IoTokenBucket;
@@ -20,10 +23,11 @@ use astra_core::raft::{
 };
 use astra_core::store::{key_in_range, KvStore, RangeOutput, ValueEntry};
 use astra_core::tiering::{decode_chunk_to_rows, TierManifest, TieringManager};
-use astra_core::watch::{WatchEventKind, WatchFilter};
+use astra_core::watch::{WatchEvent, WatchEventKind, WatchFilter, WatchReceiver};
 use astra_proto::astraadminpb::astra_admin_server::{AstraAdmin, AstraAdminServer};
 use astra_proto::astraadminpb::{
     BulkLoadRequest, BulkLoadResponse, GetBulkLoadJobRequest, GetBulkLoadJobResponse,
+    StreamListChunk, StreamListRequest,
 };
 use astra_proto::astraraftpb::internal_raft_server::InternalRaftServer;
 use astra_proto::etcdserverpb::kv_client::KvClient;
@@ -43,8 +47,10 @@ use astra_proto::etcdserverpb::{
     WatchResponse,
 };
 use astra_proto::mvccpb::KeyValue;
+use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use clap::Parser;
-use futures::Stream;
+use futures::{stream, Stream, StreamExt};
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use openraft::error::RaftError;
@@ -772,8 +778,350 @@ fn now_micros() -> u64 {
         .unwrap_or_default()
 }
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_process_allocator() {
+    unsafe {
+        libc::malloc_trim(0);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_process_allocator() {}
+
 fn now_millis() -> u64 {
     now_micros() / 1_000
+}
+
+const LARGE_VALUE_POINTER_MAGIC: &[u8] = b"__astra_large_value_pointer_v1__:";
+const S3_MIN_MULTIPART_PART_SIZE: usize = 5 * 1024 * 1024;
+const LIST_STREAM_HYDRATE_CONCURRENCY: usize = 16;
+const LIST_STREAM_QUEUE_DEPTH: usize = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LargeValuePointerRef {
+    bucket: String,
+    key: String,
+    size_bytes: u64,
+}
+
+#[derive(Debug, Default)]
+struct LargeValueHydrateCacheState {
+    values: HashMap<String, Arc<Vec<u8>>>,
+    order: VecDeque<String>,
+    bytes: usize,
+}
+
+#[derive(Clone)]
+struct LargeValueTiering {
+    client: aws_sdk_s3::Client,
+    bucket: String,
+    key_prefix: String,
+    threshold_bytes: usize,
+    upload_chunk_bytes: usize,
+    upload_timeout: Duration,
+    hydrate_cache_max_bytes: usize,
+    hydrate_cache: Arc<AsyncMutex<LargeValueHydrateCacheState>>,
+    next_object_seq: Arc<AtomicU64>,
+}
+
+impl LargeValueTiering {
+    async fn from_config(
+        s3_cfg: &S3Config,
+        threshold_bytes: usize,
+        upload_chunk_bytes: usize,
+        upload_timeout_secs: u64,
+        hydrate_cache_max_bytes: usize,
+    ) -> Self {
+        let client = build_s3_client(s3_cfg).await;
+        Self {
+            client,
+            bucket: s3_cfg.bucket.clone(),
+            key_prefix: s3_cfg.key_prefix.clone(),
+            threshold_bytes: threshold_bytes.max(1),
+            upload_chunk_bytes: upload_chunk_bytes.max(1_024),
+            upload_timeout: Duration::from_secs(upload_timeout_secs.max(1)),
+            hydrate_cache_max_bytes: hydrate_cache_max_bytes.max(4 * 1_024),
+            hydrate_cache: Arc::new(AsyncMutex::new(LargeValueHydrateCacheState::default())),
+            next_object_seq: Arc::new(AtomicU64::new(1)),
+        }
+    }
+
+    fn should_tier(&self, value_len: usize) -> bool {
+        value_len >= self.threshold_bytes
+    }
+
+    fn next_object_key(&self, value_len: usize, checksum: u32) -> String {
+        let seq = self.next_object_seq.fetch_add(1, Ordering::Relaxed);
+        let leaf = format!(
+            "large-values/{:016x}-{:016x}-{:08x}-{value_len}b.bin",
+            now_micros(),
+            seq,
+            checksum
+        );
+        join_s3_key(&self.key_prefix, &leaf)
+    }
+
+    fn encode_pointer(pointer: &LargeValuePointerRef) -> Result<Vec<u8>> {
+        let payload = serde_json::to_vec(pointer).context("serialize large-value pointer")?;
+        let mut out = Vec::with_capacity(LARGE_VALUE_POINTER_MAGIC.len() + payload.len());
+        out.extend_from_slice(LARGE_VALUE_POINTER_MAGIC);
+        out.extend_from_slice(payload.as_slice());
+        Ok(out)
+    }
+
+    fn decode_pointer(value: &[u8]) -> Option<LargeValuePointerRef> {
+        let payload = value.strip_prefix(LARGE_VALUE_POINTER_MAGIC)?;
+        serde_json::from_slice(payload).ok()
+    }
+
+    async fn maybe_tier_value(&self, value: &[u8]) -> Result<Option<Vec<u8>>, Status> {
+        if !self.should_tier(value.len()) {
+            return Ok(None);
+        }
+
+        let checksum = crc32c::crc32c(value);
+        let object_key = self.next_object_key(value.len(), checksum);
+        let started = Instant::now();
+        let upload =
+            tokio::time::timeout(self.upload_timeout, self.upload_value(&object_key, value)).await;
+        match upload {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                metrics::inc_large_value_upload_failures_total();
+                return Err(Status::unavailable(format!(
+                    "large-value tier upload failed: {err}"
+                )));
+            }
+            Err(_) => {
+                metrics::inc_large_value_upload_failures_total();
+                return Err(Status::deadline_exceeded(format!(
+                    "large-value tier upload timed out after {}s",
+                    self.upload_timeout.as_secs()
+                )));
+            }
+        }
+        metrics::observe_large_value_upload_ms(started.elapsed().as_millis() as u64);
+
+        let pointer = LargeValuePointerRef {
+            bucket: self.bucket.clone(),
+            key: object_key,
+            size_bytes: value.len() as u64,
+        };
+        let marker = Self::encode_pointer(&pointer).map_err(|err| {
+            Status::internal(format!("failed to encode large-value tier pointer: {err}"))
+        })?;
+        Ok(Some(marker))
+    }
+
+    async fn maybe_hydrate_value(&self, value: &[u8]) -> Result<Option<Vec<u8>>, Status> {
+        let Some(pointer) = Self::decode_pointer(value) else {
+            return Ok(None);
+        };
+        let bucket = if pointer.bucket.is_empty() {
+            self.bucket.as_str()
+        } else {
+            pointer.bucket.as_str()
+        };
+        let cache_key = format!("{bucket}/{}", pointer.key);
+        if let Some(cached) = self.hydrate_cache_get(&cache_key).await {
+            metrics::inc_large_value_hydrate_cache_hits_total();
+            return Ok(Some(cached));
+        }
+        metrics::inc_large_value_hydrate_cache_misses_total();
+
+        let started = Instant::now();
+        let fetched = tokio::time::timeout(self.upload_timeout, async {
+            let object = self
+                .client
+                .get_object()
+                .bucket(bucket)
+                .key(&pointer.key)
+                .send()
+                .await
+                .map_err(|err| format!("get_object failed for {bucket}/{}: {err}", pointer.key))?;
+            object
+                .body
+                .collect()
+                .await
+                .map_err(|err| {
+                    format!(
+                        "read object body failed for {bucket}/{}: {err}",
+                        pointer.key
+                    )
+                })
+                .map(|bytes| bytes.into_bytes().to_vec())
+        })
+        .await;
+
+        let bytes = match fetched {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(err)) => {
+                return Err(Status::unavailable(format!(
+                    "large-value hydrate failed: {err}"
+                )))
+            }
+            Err(_) => {
+                return Err(Status::deadline_exceeded(format!(
+                    "large-value hydrate timed out after {}s",
+                    self.upload_timeout.as_secs()
+                )))
+            }
+        };
+        metrics::observe_large_value_hydrate_ms(started.elapsed().as_millis() as u64);
+
+        if pointer.size_bytes > 0 && pointer.size_bytes as usize != bytes.len() {
+            warn!(
+                expected = pointer.size_bytes,
+                actual = bytes.len(),
+                key = %pointer.key,
+                "large-value hydrate size mismatch"
+            );
+        }
+        self.hydrate_cache_insert(cache_key, bytes.clone()).await;
+        Ok(Some(bytes))
+    }
+
+    async fn upload_value(
+        &self,
+        object_key: &str,
+        value: &[u8],
+    ) -> std::result::Result<(), String> {
+        let multipart_chunk = self.upload_chunk_bytes.max(S3_MIN_MULTIPART_PART_SIZE);
+        if value.len() <= multipart_chunk {
+            self.client
+                .put_object()
+                .bucket(&self.bucket)
+                .key(object_key)
+                .body(ByteStream::from(value.to_vec()))
+                .send()
+                .await
+                .map_err(|err| format!("put_object failed: {err}"))?;
+            return Ok(());
+        }
+        self.upload_multipart(object_key, value).await
+    }
+
+    async fn upload_multipart(
+        &self,
+        object_key: &str,
+        value: &[u8],
+    ) -> std::result::Result<(), String> {
+        let created = self
+            .client
+            .create_multipart_upload()
+            .bucket(&self.bucket)
+            .key(object_key)
+            .send()
+            .await
+            .map_err(|err| format!("create_multipart_upload failed: {err}"))?;
+        let upload_id = created
+            .upload_id()
+            .map(ToOwned::to_owned)
+            .ok_or_else(|| "create_multipart_upload returned empty upload_id".to_string())?;
+
+        let upload_result = async {
+            let mut parts = Vec::new();
+            let mut part_number = 1_i32;
+            let part_size = self.upload_chunk_bytes.max(S3_MIN_MULTIPART_PART_SIZE);
+            for chunk in value.chunks(part_size.max(1)) {
+                if part_number > 10_000 {
+                    return Err("multipart upload exceeded 10,000 parts".to_string());
+                }
+                let uploaded = self
+                    .client
+                    .upload_part()
+                    .bucket(&self.bucket)
+                    .key(object_key)
+                    .upload_id(&upload_id)
+                    .part_number(part_number)
+                    .body(ByteStream::from(chunk.to_vec()))
+                    .send()
+                    .await
+                    .map_err(|err| format!("upload_part #{part_number} failed: {err:?}"))?;
+                let mut part = CompletedPart::builder().part_number(part_number);
+                if let Some(etag) = uploaded.e_tag().map(ToOwned::to_owned) {
+                    part = part.e_tag(etag);
+                }
+                parts.push(part.build());
+                part_number += 1;
+            }
+            let complete = CompletedMultipartUpload::builder()
+                .set_parts(Some(parts))
+                .build();
+            self.client
+                .complete_multipart_upload()
+                .bucket(&self.bucket)
+                .key(object_key)
+                .upload_id(&upload_id)
+                .multipart_upload(complete)
+                .send()
+                .await
+                .map_err(|err| format!("complete_multipart_upload failed: {err:?}"))?;
+            Ok::<(), String>(())
+        }
+        .await;
+
+        if let Err(err) = upload_result {
+            let _ = self
+                .client
+                .abort_multipart_upload()
+                .bucket(&self.bucket)
+                .key(object_key)
+                .upload_id(&upload_id)
+                .send()
+                .await;
+            return Err(err);
+        }
+
+        Ok(())
+    }
+
+    async fn hydrate_cache_get(&self, key: &str) -> Option<Vec<u8>> {
+        let mut guard = self.hydrate_cache.lock().await;
+        if let Some(value) = guard.values.get(key).cloned() {
+            guard.order.retain(|existing| existing != key);
+            guard.order.push_back(key.to_string());
+            return Some((*value).clone());
+        }
+        None
+    }
+
+    async fn hydrate_cache_insert(&self, key: String, value: Vec<u8>) {
+        if self.hydrate_cache_max_bytes == 0 || value.len() > self.hydrate_cache_max_bytes {
+            return;
+        }
+        let mut guard = self.hydrate_cache.lock().await;
+        if let Some(old) = guard.values.remove(&key) {
+            guard.bytes = guard.bytes.saturating_sub(old.len());
+            guard.order.retain(|existing| existing != &key);
+        }
+        guard.bytes = guard.bytes.saturating_add(value.len());
+        guard.values.insert(key.clone(), Arc::new(value));
+        guard.order.push_back(key);
+
+        while guard.bytes > self.hydrate_cache_max_bytes {
+            let Some(oldest) = guard.order.pop_front() else {
+                break;
+            };
+            if let Some(removed) = guard.values.remove(&oldest) {
+                guard.bytes = guard.bytes.saturating_sub(removed.len());
+            }
+        }
+    }
+}
+
+async fn maybe_hydrate_value_entry(
+    tiering: Option<&LargeValueTiering>,
+    value: &mut ValueEntry,
+) -> Result<bool, Status> {
+    let Some(tiering) = tiering else {
+        return Ok(false);
+    };
+    if let Some(hydrated) = tiering.maybe_hydrate_value(&value.value).await? {
+        value.value = hydrated;
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 #[derive(Debug, Clone)]
@@ -1203,6 +1551,117 @@ impl ListPrefetchCache {
     fn should_prefetch(&self, req: &RangeRequest) -> bool {
         self.enabled && self.prefetch_pages() > 0 && req.limit > 0 && !req.count_only
     }
+}
+
+#[derive(Debug, Default)]
+struct SemanticHotCacheState {
+    entries: HashMap<Vec<u8>, ValueEntry>,
+    order: VecDeque<Vec<u8>>,
+    bytes: usize,
+    apply_revision: i64,
+}
+
+#[derive(Clone)]
+struct SemanticHotCache {
+    enabled: bool,
+    prefixes: Arc<Vec<Vec<u8>>>,
+    max_entries: usize,
+    max_bytes: usize,
+    state: Arc<tokio::sync::Mutex<SemanticHotCacheState>>,
+}
+
+impl SemanticHotCache {
+    fn new(enabled: bool, prefixes: Vec<Vec<u8>>, max_entries: usize, max_bytes: usize) -> Self {
+        Self {
+            enabled,
+            prefixes: Arc::new(prefixes),
+            max_entries: max_entries.max(1),
+            max_bytes: max_bytes.max(4 * 1024),
+            state: Arc::new(tokio::sync::Mutex::new(SemanticHotCacheState::default())),
+        }
+    }
+
+    fn is_cacheable_key(&self, key: &[u8]) -> bool {
+        self.enabled && self.prefixes.iter().any(|p| key.starts_with(p))
+    }
+
+    async fn get(&self, key: &[u8], req_revision: i64) -> Option<ValueEntry> {
+        if !self.is_cacheable_key(key) {
+            return None;
+        }
+        let guard = self.state.lock().await;
+        let entry = guard.entries.get(key)?;
+        if req_revision > 0 && entry.mod_revision > req_revision {
+            return None;
+        }
+        if entry.mod_revision > guard.apply_revision {
+            return None;
+        }
+        Some(entry.clone())
+    }
+
+    async fn upsert(&self, key: Vec<u8>, value: ValueEntry, apply_revision: i64) {
+        if !self.is_cacheable_key(&key) {
+            return;
+        }
+        let mut guard = self.state.lock().await;
+        let prev_size = guard
+            .entries
+            .get(&key)
+            .map(|v| semantic_cache_entry_size(&key, v))
+            .unwrap_or(0);
+        guard.bytes = guard.bytes.saturating_sub(prev_size);
+        guard.bytes = guard
+            .bytes
+            .saturating_add(semantic_cache_entry_size(&key, &value));
+        guard.entries.insert(key.clone(), value);
+        guard.order.push_back(key);
+        guard.apply_revision = guard.apply_revision.max(apply_revision);
+        self.evict_locked(&mut guard);
+    }
+
+    async fn remove(&self, key: &[u8], apply_revision: i64) {
+        if !self.enabled {
+            return;
+        }
+        let mut guard = self.state.lock().await;
+        if let Some(prev) = guard.entries.remove(key) {
+            guard.bytes = guard
+                .bytes
+                .saturating_sub(semantic_cache_entry_size(key, &prev));
+        }
+        guard.apply_revision = guard.apply_revision.max(apply_revision);
+    }
+
+    async fn invalidate_all(&self, apply_revision: i64) {
+        if !self.enabled {
+            return;
+        }
+        let mut guard = self.state.lock().await;
+        guard.entries.clear();
+        guard.order.clear();
+        guard.bytes = 0;
+        guard.apply_revision = guard.apply_revision.max(apply_revision);
+    }
+
+    fn evict_locked(&self, guard: &mut SemanticHotCacheState) {
+        while guard.entries.len() > self.max_entries || guard.bytes > self.max_bytes {
+            let Some(oldest) = guard.order.pop_front() else {
+                break;
+            };
+            if let Some(prev) = guard.entries.remove(&oldest) {
+                guard.bytes = guard
+                    .bytes
+                    .saturating_sub(semantic_cache_entry_size(&oldest, &prev));
+            }
+        }
+    }
+}
+
+fn semantic_cache_entry_size(key: &[u8], value: &ValueEntry) -> usize {
+    key.len()
+        .saturating_add(value.value.len())
+        .saturating_add(96)
 }
 
 fn next_page_key_from_result(result: &RangeOutput) -> Option<Vec<u8>> {
@@ -2180,9 +2639,13 @@ async fn build_s3_client(cfg: &S3Config) -> aws_sdk_s3::Client {
 #[derive(Clone)]
 struct AstraAdminService {
     raft: Raft<AstraTypeConfig>,
+    store: Arc<KvStore>,
     member_id: u64,
     tenanting: Tenanting,
     s3_cfg: Option<S3Config>,
+    large_value_tiering: Option<LargeValueTiering>,
+    list_stream_enabled: bool,
+    list_stream_chunk_bytes: usize,
     jobs: Arc<tokio::sync::Mutex<HashMap<String, BulkLoadJob>>>,
     next_job_id: Arc<AtomicU64>,
 }
@@ -2190,15 +2653,23 @@ struct AstraAdminService {
 impl AstraAdminService {
     fn new(
         raft: Raft<AstraTypeConfig>,
+        store: Arc<KvStore>,
         member_id: u64,
         tenanting: Tenanting,
         s3_cfg: Option<S3Config>,
+        large_value_tiering: Option<LargeValueTiering>,
+        list_stream_enabled: bool,
+        list_stream_chunk_bytes: usize,
     ) -> Self {
         Self {
             raft,
+            store,
             member_id,
             tenanting,
             s3_cfg,
+            large_value_tiering,
+            list_stream_enabled,
+            list_stream_chunk_bytes: list_stream_chunk_bytes.max(4 * 1024),
             jobs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             next_job_id: Arc::new(AtomicU64::new(1)),
         }
@@ -2421,6 +2892,9 @@ impl AstraAdminService {
 
 #[tonic::async_trait]
 impl AstraAdmin for AstraAdminService {
+    type StreamListStream =
+        Pin<Box<dyn Stream<Item = Result<StreamListChunk, Status>> + Send + 'static>>;
+
     async fn bulk_load(
         &self,
         request: Request<BulkLoadRequest>,
@@ -2500,6 +2974,193 @@ impl AstraAdmin for AstraAdminService {
             finished_at_unix_ms: job.finished_at_unix_ms,
         }))
     }
+
+    async fn stream_list(
+        &self,
+        request: Request<StreamListRequest>,
+    ) -> Result<Response<Self::StreamListStream>, Status> {
+        if !self.list_stream_enabled {
+            return Err(Status::failed_precondition(
+                "stream list is disabled (set ASTRAD_LIST_STREAM_ENABLED=true)",
+            ));
+        }
+        let tenant = self.tenanting.tenant_from_request(&request)?;
+        let req = request.into_inner();
+        let (start_key, range_end) =
+            self.tenanting
+                .encode_range(tenant.as_deref(), &req.key, &req.range_end);
+        trim_process_allocator();
+        let store = self.store.clone();
+        let tenanting = self.tenanting;
+        let large_value_tiering = self.large_value_tiering.clone();
+        let chunk_budget = if req.page_size_bytes == 0 {
+            self.list_stream_chunk_bytes
+        } else {
+            (req.page_size_bytes as usize).max(4 * 1024)
+        };
+        let entry_budget_bytes = large_value_tiering
+            .as_ref()
+            .map(|tiering| tiering.threshold_bytes.saturating_mul(4).max(16 * 1024))
+            .unwrap_or(2_048);
+        let per_chunk_limit = ((chunk_budget / entry_budget_bytes.max(1)).max(1)).min(4_096) as i64;
+        let requested_limit = if req.limit > 0 { Some(req.limit) } else { None };
+        let revision = req.revision;
+        let keys_only = req.keys_only;
+        let count_only = req.count_only;
+        let (tx, rx) = mpsc::channel(LIST_STREAM_QUEUE_DEPTH.max(1));
+
+        tokio::spawn(async move {
+            let mut cursor = start_key;
+            let mut remaining = requested_limit;
+
+            loop {
+                let limit = remaining
+                    .map(|v| v.min(per_chunk_limit).max(1))
+                    .unwrap_or(per_chunk_limit);
+
+                let result = match run_isolated_range(
+                    store.clone(),
+                    true,
+                    cursor.clone(),
+                    range_end.clone(),
+                    limit,
+                    revision,
+                    keys_only,
+                    count_only,
+                )
+                .await
+                {
+                    Ok(out) => out,
+                    Err(err) => {
+                        let _ = tx.send(Err(map_store_err(err))).await;
+                        break;
+                    }
+                };
+
+                let mut kvs = Vec::new();
+                let mut chunk_bytes = 0usize;
+                let mut hydrated_values = 0usize;
+                let mut hydrated_bytes = 0usize;
+                if !count_only {
+                    let mut buffered = stream::iter(result.kvs.iter().cloned().map(|(k, v)| {
+                        let logical_key = tenanting.decode_key(tenant.as_deref(), &k);
+                        let tiering = large_value_tiering.clone();
+                        async move {
+                            let mut value = v;
+                            let hydrated =
+                                maybe_hydrate_value_entry(tiering.as_ref(), &mut value).await?;
+                            let value_len = value.value.len();
+                            Ok::<_, Status>((
+                                to_pb_kv(logical_key.clone(), value),
+                                logical_key.len().saturating_add(value_len),
+                                hydrated,
+                                value_len,
+                            ))
+                        }
+                    }))
+                    .buffered(LIST_STREAM_HYDRATE_CONCURRENCY.max(1));
+
+                    while let Some(item) = buffered.next().await {
+                        let (kv, emitted_bytes, hydrated, value_len) = match item {
+                            Ok(item) => item,
+                            Err(status) => {
+                                let _ = tx.send(Err(status)).await;
+                                return;
+                            }
+                        };
+                        chunk_bytes = chunk_bytes.saturating_add(emitted_bytes);
+                        if hydrated {
+                            hydrated_values = hydrated_values.saturating_add(1);
+                            hydrated_bytes = hydrated_bytes.saturating_add(value_len);
+                        }
+                        kvs.push(kv);
+                    }
+                }
+                metrics::add_list_stream_chunk(chunk_bytes);
+                if hydrated_values > 0 {
+                    metrics::add_list_stream_hydrated(hydrated_values, hydrated_bytes);
+                }
+
+                let next_key = if result.more {
+                    next_page_key_from_result(&result).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                if tx
+                    .send(Ok(StreamListChunk {
+                        revision: result.revision,
+                        kvs,
+                        more: result.more,
+                        count: result.count,
+                        next_key: next_key.clone(),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+
+                if let Some(current_remaining) = remaining {
+                    let consumed = result.kvs.len() as i64;
+                    let left = current_remaining.saturating_sub(consumed);
+                    if left <= 0 {
+                        break;
+                    }
+                    remaining = Some(left);
+                }
+
+                if !result.more {
+                    break;
+                }
+                cursor = next_key;
+            }
+        });
+
+        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
+    }
+}
+
+fn forwarded_client_endpoint(target: &str) -> Result<tonic::transport::Endpoint, Status> {
+    let endpoint = if target.starts_with("http://") || target.starts_with("https://") {
+        target.to_string()
+    } else {
+        format!("http://{target}")
+    };
+
+    tonic::transport::Endpoint::from_shared(endpoint.clone()).map_err(|err| {
+        Status::invalid_argument(format!("invalid forwarded leader endpoint {endpoint}: {err}"))
+    })
+}
+
+fn maybe_log_forward_rpc_status(
+    op: &'static str,
+    target: &str,
+    status: &Status,
+    grpc_max_decoding_message_bytes: usize,
+    grpc_max_encoding_message_bytes: usize,
+) {
+    let message = status.message().to_ascii_lowercase();
+    let message_size_related = message.contains("decoded message length too large")
+        || message.contains("encoded message length too large")
+        || message.contains("message too large");
+
+    if message_size_related
+        || matches!(
+            status.code(),
+            Code::OutOfRange | Code::ResourceExhausted | Code::InvalidArgument
+        )
+    {
+        warn!(
+            op,
+            target,
+            code = ?status.code(),
+            grpc_max_decoding_message_bytes,
+            grpc_max_encoding_message_bytes,
+            error = %status,
+            "forwarded RPC failed near gRPC message-size limit"
+        );
+    }
 }
 
 #[derive(Clone)]
@@ -2513,13 +3174,17 @@ struct EtcdKvService {
     put_batcher: Option<PutBatcher>,
     write_pressure: WritePressureGate,
     semantic_qos: SemanticQos,
+    semantic_hot_cache: SemanticHotCache,
     list_prefetch_cache: ListPrefetchCache,
     read_isolation_enabled: bool,
     gateway_read_ticket: GatewayReadTicket,
     gateway_singleflight: GatewayGetSingleflight,
+    large_value_tiering: Option<LargeValueTiering>,
     timeline_enabled: bool,
     timeline_sample_rate: u64,
     timeline_seq: Arc<AtomicU64>,
+    grpc_max_decoding_message_bytes: usize,
+    grpc_max_encoding_message_bytes: usize,
 }
 
 impl EtcdKvService {
@@ -2561,15 +3226,14 @@ impl EtcdKvService {
     }
 
     async fn kv_client(&self, target: &str) -> Result<KvClient<tonic::transport::Channel>, Status> {
-        let endpoint = if target.starts_with("http://") || target.starts_with("https://") {
-            target.to_string()
-        } else {
-            format!("http://{target}")
-        };
-
-        KvClient::connect(endpoint)
+        let channel = forwarded_client_endpoint(target)?
+            .connect()
             .await
-            .map_err(|e| Status::unavailable(format!("failed to connect forwarded leader: {e}")))
+            .map_err(|e| Status::unavailable(format!("failed to connect forwarded leader: {e}")))?;
+
+        Ok(KvClient::new(channel)
+            .max_decoding_message_size(self.grpc_max_decoding_message_bytes)
+            .max_encoding_message_size(self.grpc_max_encoding_message_bytes))
     }
 
     fn attach_auth_metadata<T>(
@@ -2594,9 +3258,19 @@ impl EtcdKvService {
         auth_header: Option<&str>,
     ) -> Result<Response<RangeResponse>, Status> {
         let mut client = self.kv_client(target).await?;
-        client
+        let response = client
             .range(Self::attach_auth_metadata(Request::new(req), auth_header)?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "range",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_range_any(
@@ -2634,9 +3308,19 @@ impl EtcdKvService {
         auth_header: Option<&str>,
     ) -> Result<Response<PutResponse>, Status> {
         let mut client = self.kv_client(target).await?;
-        client
+        let response = client
             .put(Self::attach_auth_metadata(Request::new(req), auth_header)?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "put",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_delete_range(
@@ -2646,9 +3330,19 @@ impl EtcdKvService {
         auth_header: Option<&str>,
     ) -> Result<Response<DeleteRangeResponse>, Status> {
         let mut client = self.kv_client(target).await?;
-        client
+        let response = client
             .delete_range(Self::attach_auth_metadata(Request::new(req), auth_header)?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "delete_range",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_txn(
@@ -2658,9 +3352,19 @@ impl EtcdKvService {
         auth_header: Option<&str>,
     ) -> Result<Response<TxnResponse>, Status> {
         let mut client = self.kv_client(target).await?;
-        client
+        let response = client
             .txn(Self::attach_auth_metadata(Request::new(req), auth_header)?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "txn",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_compact(
@@ -2670,9 +3374,19 @@ impl EtcdKvService {
         auth_header: Option<&str>,
     ) -> Result<Response<CompactionResponse>, Status> {
         let mut client = self.kv_client(target).await?;
-        client
+        let response = client
             .compact(Self::attach_auth_metadata(Request::new(req), auth_header)?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "compact",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn execute_range(
@@ -2696,6 +3410,32 @@ impl EtcdKvService {
         )
         .await
         .map_err(map_store_err)
+    }
+
+    async fn refresh_semantic_cache_for_key(&self, key: Vec<u8>) {
+        if !self.semantic_hot_cache.is_cacheable_key(&key) {
+            return;
+        }
+        let Ok(result) = self
+            .execute_range(key.clone(), Vec::new(), 1, 0, false, false)
+            .await
+        else {
+            return;
+        };
+        let apply_revision = result.revision;
+        if let Some((_, mut value)) = result.kvs.into_iter().next() {
+            if maybe_hydrate_value_entry(self.large_value_tiering.as_ref(), &mut value)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            self.semantic_hot_cache
+                .upsert(key, value, apply_revision)
+                .await;
+        } else {
+            self.semantic_hot_cache.remove(&key, apply_revision).await;
+        }
     }
 
     async fn execute_range_with_prefetch(
@@ -2814,6 +3554,50 @@ impl EtcdKvService {
             more: result.more,
             count: result.count,
         })
+    }
+
+    async fn range_output_to_response_hydrated(
+        &self,
+        tenant: Option<&str>,
+        req: &RangeRequest,
+        mut result: RangeOutput,
+    ) -> Result<Response<RangeResponse>, Status> {
+        self.maybe_hydrate_range_output(req, &mut result).await?;
+        Ok(self.range_output_to_response(tenant, req, result))
+    }
+
+    async fn maybe_hydrate_range_output(
+        &self,
+        req: &RangeRequest,
+        result: &mut RangeOutput,
+    ) -> Result<(), Status> {
+        if req.count_only || req.keys_only {
+            return Ok(());
+        }
+        for (_, value) in result.kvs.iter_mut() {
+            let _ = maybe_hydrate_value_entry(self.large_value_tiering.as_ref(), value).await?;
+        }
+        Ok(())
+    }
+
+    async fn maybe_prepare_put_for_large_value(
+        &self,
+        req: &mut PutRequest,
+        is_local_leader: bool,
+    ) -> Result<(), Status> {
+        if req.ignore_value {
+            return Ok(());
+        }
+        if !is_local_leader {
+            return Ok(());
+        }
+        let Some(tiering) = self.large_value_tiering.as_ref() else {
+            return Ok(());
+        };
+        if let Some(marker) = tiering.maybe_tier_value(&req.value).await? {
+            req.value = marker;
+        }
+        Ok(())
     }
 
     fn forward_candidates(&self, preferred: Option<&str>) -> Vec<String> {
@@ -3027,7 +3811,7 @@ impl EtcdKvService {
         let physical_key = self.tenanting.encode_key(tenant, &req.key);
         let key = req.key.clone();
         let write_req = AstraWriteRequest::Put {
-            key: physical_key,
+            key: physical_key.clone(),
             value: req.value.clone(),
             lease: req.lease,
             ignore_value: req.ignore_value,
@@ -3057,6 +3841,7 @@ impl EtcdKvService {
             }
         };
         self.list_prefetch_cache.invalidate_all().await;
+        self.refresh_semantic_cache_for_key(physical_key).await;
 
         Ok(Response::new(PutResponse {
             header: Some(self.header(revision)),
@@ -3094,6 +3879,7 @@ impl EtcdKvService {
             }
         };
         self.list_prefetch_cache.invalidate_all().await;
+        self.semantic_hot_cache.invalidate_all(revision).await;
 
         Ok(Response::new(CompactionResponse {
             header: Some(self.header(revision)),
@@ -3400,6 +4186,7 @@ impl EtcdKvService {
             }
         };
         self.list_prefetch_cache.invalidate_all().await;
+        self.semantic_hot_cache.invalidate_all(revision).await;
 
         let branch = if succeeded { &success } else { &failure };
         let responses = self.map_txn_op_responses(tenant, branch, &responses)?;
@@ -3483,6 +4270,31 @@ impl Kv for EtcdKvService {
             count_only: req.count_only,
         };
 
+        if is_get {
+            if let Some(mut cached) = self.semantic_hot_cache.get(&key, req.revision).await {
+                metrics::inc_semantic_cache_hits();
+                if req.keys_only {
+                    cached.value.clear();
+                }
+                let revision = self.store.current_revision().max(cached.mod_revision);
+                return self
+                    .range_output_to_response_hydrated(
+                        tenant.as_deref(),
+                        &req,
+                        RangeOutput {
+                            revision,
+                            count: 1,
+                            more: false,
+                            kvs: vec![(key.clone(), cached)],
+                        },
+                    )
+                    .await;
+            }
+            if self.semantic_hot_cache.is_cacheable_key(&key) {
+                metrics::inc_semantic_cache_misses();
+            }
+        }
+
         let execute_local_read = || async {
             self.execute_range_with_prefetch(
                 &req,
@@ -3508,21 +4320,26 @@ impl Kv for EtcdKvService {
                 GatewayGetJoinRole::Waiter(waiter) => {
                     if let Some(waited) = self.gateway_singleflight.await_waiter(waiter).await {
                         let result = waited?;
-                        return Ok(self.range_output_to_response(tenant.as_deref(), &req, result));
+                        return self
+                            .range_output_to_response_hydrated(tenant.as_deref(), &req, result)
+                            .await;
                     }
                 }
                 GatewayGetJoinRole::LeaderTracked => {
                     let result = execute_local_read().await;
                     self.gateway_singleflight.complete(&gate_key, &result).await;
                     let result = result?;
-                    return Ok(self.range_output_to_response(tenant.as_deref(), &req, result));
+                    return self
+                        .range_output_to_response_hydrated(tenant.as_deref(), &req, result)
+                        .await;
                 }
                 GatewayGetJoinRole::Bypass => {}
             }
         }
 
         let result = execute_local_read().await?;
-        Ok(self.range_output_to_response(tenant.as_deref(), &req, result))
+        self.range_output_to_response_hydrated(tenant.as_deref(), &req, result)
+            .await
     }
 
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
@@ -3538,7 +4355,7 @@ impl Kv for EtcdKvService {
             .and_then(|v| v.to_str().ok())
             .map(ToOwned::to_owned);
         let tenant = self.tenanting.tenant_from_request(&request)?;
-        let req = request.into_inner();
+        let mut req = request.into_inner();
         metrics::inc_request_put_total();
         let physical_key = self.tenanting.encode_key(tenant.as_deref(), &req.key);
         let write_priority = self.semantic_qos.key_priority(&physical_key);
@@ -3558,9 +4375,12 @@ impl Kv for EtcdKvService {
             .unwrap_or(0);
         self.maybe_enforce_write_pressure(put_queue_depth, write_priority)
             .await?;
+        let is_local_leader = self.raft.current_leader().await == Some(self.member_id);
+        self.maybe_prepare_put_for_large_value(&mut req, is_local_leader)
+            .await?;
 
         if let Some(put_batcher) = &self.put_batcher {
-            if self.raft.current_leader().await == Some(self.member_id) {
+            if is_local_leader {
                 if self.timeline_enabled {
                     let seq = self.timeline_seq.fetch_add(1, Ordering::Relaxed);
                     if seq % self.timeline_sample_rate.max(1) == 0 {
@@ -3579,6 +4399,8 @@ impl Kv for EtcdKvService {
                 match put_batcher.submit(local_req, write_priority).await {
                     Ok((revision, prev)) => {
                         self.list_prefetch_cache.invalidate_all().await;
+                        self.refresh_semantic_cache_for_key(physical_key.clone())
+                            .await;
                         return Ok(Response::new(PutResponse {
                             header: Some(self.header(revision)),
                             prev_kv: prev.map(|v| to_pb_kv(key, v)),
@@ -3651,6 +4473,7 @@ impl Kv for EtcdKvService {
             }
         };
         self.list_prefetch_cache.invalidate_all().await;
+        self.semantic_hot_cache.invalidate_all(revision).await;
 
         let prev = prev_kvs
             .into_iter()
@@ -3715,7 +4538,10 @@ struct EtcdLeaseService {
     tenanting: Tenanting,
     leader_client_by_id: Arc<HashMap<u64, String>>,
     write_pressure: WritePressureGate,
+    semantic_hot_cache: SemanticHotCache,
     list_prefetch_cache: ListPrefetchCache,
+    grpc_max_decoding_message_bytes: usize,
+    grpc_max_encoding_message_bytes: usize,
 }
 
 impl EtcdLeaseService {
@@ -3759,14 +4585,13 @@ impl EtcdLeaseService {
         &self,
         target: &str,
     ) -> Result<LeaseClient<tonic::transport::Channel>, Status> {
-        let endpoint = if target.starts_with("http://") || target.starts_with("https://") {
-            target.to_string()
-        } else {
-            format!("http://{target}")
-        };
-        LeaseClient::connect(endpoint)
+        let channel = forwarded_client_endpoint(target)?
+            .connect()
             .await
-            .map_err(|e| Status::unavailable(format!("failed to connect forwarded leader: {e}")))
+            .map_err(|e| Status::unavailable(format!("failed to connect forwarded leader: {e}")))?;
+        Ok(LeaseClient::new(channel)
+            .max_decoding_message_size(self.grpc_max_decoding_message_bytes)
+            .max_encoding_message_size(self.grpc_max_encoding_message_bytes))
     }
 
     async fn forward_lease_grant(
@@ -3776,12 +4601,22 @@ impl EtcdLeaseService {
         auth_header: Option<&str>,
     ) -> Result<Response<LeaseGrantResponse>, Status> {
         let mut client = self.lease_client(target).await?;
-        client
+        let response = client
             .lease_grant(EtcdKvService::attach_auth_metadata(
                 Request::new(req),
                 auth_header,
             )?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "lease_grant",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_lease_revoke(
@@ -3791,12 +4626,22 @@ impl EtcdLeaseService {
         auth_header: Option<&str>,
     ) -> Result<Response<LeaseRevokeResponse>, Status> {
         let mut client = self.lease_client(target).await?;
-        client
+        let response = client
             .lease_revoke(EtcdKvService::attach_auth_metadata(
                 Request::new(req),
                 auth_header,
             )?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "lease_revoke",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_lease_time_to_live(
@@ -3806,12 +4651,22 @@ impl EtcdLeaseService {
         auth_header: Option<&str>,
     ) -> Result<Response<LeaseTimeToLiveResponse>, Status> {
         let mut client = self.lease_client(target).await?;
-        client
+        let response = client
             .lease_time_to_live(EtcdKvService::attach_auth_metadata(
                 Request::new(req),
                 auth_header,
             )?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "lease_time_to_live",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn forward_lease_leases(
@@ -3821,12 +4676,22 @@ impl EtcdLeaseService {
         auth_header: Option<&str>,
     ) -> Result<Response<LeaseLeasesResponse>, Status> {
         let mut client = self.lease_client(target).await?;
-        client
+        let response = client
             .lease_leases(EtcdKvService::attach_auth_metadata(
                 Request::new(req),
                 auth_header,
             )?)
-            .await
+            .await;
+        if let Err(status) = &response {
+            maybe_log_forward_rpc_status(
+                "lease_leases",
+                target,
+                status,
+                self.grpc_max_decoding_message_bytes,
+                self.grpc_max_encoding_message_bytes,
+            );
+        }
+        response
     }
 
     async fn maybe_enforce_write_pressure(&self) -> Result<(), Status> {
@@ -3881,6 +4746,7 @@ impl Lease for EtcdLeaseService {
             }
         };
         self.list_prefetch_cache.invalidate_all().await;
+        self.semantic_hot_cache.invalidate_all(revision).await;
 
         Ok(Response::new(LeaseGrantResponse {
             header: Some(self.header(revision)),
@@ -3926,6 +4792,7 @@ impl Lease for EtcdLeaseService {
             }
         };
         self.list_prefetch_cache.invalidate_all().await;
+        self.semantic_hot_cache.invalidate_all(revision).await;
 
         Ok(Response::new(LeaseRevokeResponse {
             header: Some(self.header(revision)),
@@ -3986,6 +4853,7 @@ impl Lease for EtcdLeaseService {
                     }
                 };
                 svc.list_prefetch_cache.invalidate_all().await;
+                svc.semantic_hot_cache.invalidate_all(revision).await;
 
                 if tx
                     .send(Ok(LeaseKeepAliveResponse {
@@ -4085,10 +4953,64 @@ impl Lease for EtcdLeaseService {
 #[derive(Clone)]
 struct EtcdWatchService {
     store: Arc<KvStore>,
+    raft: Raft<AstraTypeConfig>,
     cluster_id: u64,
     member_id: u64,
     tenanting: Tenanting,
+    leader_client_by_id: Arc<HashMap<u64, String>>,
+    watch_accept_role: WatchAcceptRole,
+    watch_redirect_hint: Option<String>,
+    watch_dispatch_workers: usize,
+    watch_stream_queue_depth: usize,
+    watch_slow_cancel_grace: Duration,
+    watch_emit_batch_max: usize,
+    watch_lagged_policy: WatchLaggedPolicy,
+    watch_lagged_resync_limit: usize,
     next_watch_id: Arc<AtomicI64>,
+    shared_live_routes: SharedWatchRouteRegistry,
+}
+
+const SHARED_WATCH_ROUTE_RECENT_CAPACITY: usize = 1024;
+
+type WatchStreamTx = mpsc::Sender<Result<WatchResponse, Status>>;
+type SharedWatchRouteRegistry =
+    Arc<AsyncMutex<HashMap<SharedWatchRouteKey, mpsc::UnboundedSender<SharedWatchRouteCommand>>>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SharedWatchRouteKey {
+    tenant: Option<String>,
+    key: Vec<u8>,
+    range_end: Vec<u8>,
+    include_prev_kv: bool,
+}
+
+#[derive(Clone)]
+struct SharedWatchSubscriber {
+    watch_id: i64,
+    start_revision: i64,
+    tx: WatchStreamTx,
+    stream_capacity: usize,
+    slow_cancel_grace: Duration,
+}
+
+enum SharedWatchRouteCommand {
+    Register(SharedWatchSubscriber),
+    Unregister(i64),
+}
+
+#[derive(Clone)]
+struct SharedWatchBatch {
+    raw_events: Arc<Vec<Arc<WatchEvent>>>,
+    full_events: Arc<Vec<Event>>,
+    first_revision: i64,
+    batch_revision: i64,
+    latest_commit_ts_micros: u64,
+}
+
+struct SharedWatchDispatchOutcome {
+    watch_id: i64,
+    next_start_revision: i64,
+    closed: bool,
 }
 
 impl EtcdWatchService {
@@ -4100,6 +5022,678 @@ impl EtcdWatchService {
             raft_term: 1,
         }
     }
+
+    fn redirect_hint(&self) -> Option<String> {
+        if let Some(hint) = self.watch_redirect_hint.as_ref() {
+            let trimmed = hint.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        self.leader_client_by_id
+            .iter()
+            .filter(|(id, _)| **id != self.member_id)
+            .map(|(_, target)| target.clone())
+            .next()
+    }
+
+    async fn register_shared_live_subscriber(
+        &self,
+        route_key: SharedWatchRouteKey,
+        filter: WatchFilter,
+        subscriber: SharedWatchSubscriber,
+    ) -> Result<(), Status> {
+        for _ in 0..2 {
+            let cmd_tx = {
+                let mut routes = self.shared_live_routes.lock().await;
+                if let Some(existing) = routes.get(&route_key) {
+                    existing.clone()
+                } else {
+                    let live_rx = self.store.subscribe_watch_live(&filter);
+                    let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+                    routes.insert(route_key.clone(), cmd_tx.clone());
+                    tokio::spawn(run_shared_watch_route(
+                        self.shared_live_routes.clone(),
+                        route_key.clone(),
+                        live_rx,
+                        cmd_rx,
+                        self.tenanting,
+                        self.cluster_id,
+                        self.member_id,
+                        self.watch_dispatch_workers.max(1),
+                        self.watch_emit_batch_max.max(1),
+                    ));
+                    cmd_tx
+                }
+            };
+
+            if cmd_tx
+                .send(SharedWatchRouteCommand::Register(subscriber.clone()))
+                .is_ok()
+            {
+                return Ok(());
+            }
+
+            self.shared_live_routes.lock().await.remove(&route_key);
+        }
+
+        Err(Status::internal("shared watch route registration failed"))
+    }
+}
+
+async fn send_watch_response_with_backpressure(
+    tx: &mpsc::Sender<Result<WatchResponse, Status>>,
+    response: WatchResponse,
+    watch_id: i64,
+    stream_capacity: usize,
+    slow_cancel_grace: Duration,
+) -> bool {
+    if !response.events.is_empty() {
+        metrics::observe_watch_emit_batch_size(response.events.len());
+    }
+    metrics::set_watch_dispatch_queue_depth(stream_capacity.saturating_sub(tx.capacity()));
+    let item = match tx.try_send(Ok(response)) {
+        Ok(()) => {
+            metrics::set_watch_dispatch_queue_depth(stream_capacity.saturating_sub(tx.capacity()));
+            return true;
+        }
+        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => return false,
+        Err(tokio::sync::mpsc::error::TrySendError::Full(item)) => item,
+    };
+    match tokio::time::timeout(slow_cancel_grace, tx.send(item)).await {
+        Ok(Ok(())) => {
+            metrics::set_watch_dispatch_queue_depth(stream_capacity.saturating_sub(tx.capacity()));
+            true
+        }
+        Ok(Err(_)) => false,
+        Err(_) => {
+            metrics::inc_watch_slow_cancels_total();
+            warn!(
+                watch_id,
+                slow_cancel_grace_ms = slow_cancel_grace.as_millis() as u64,
+                "watch stream canceled due to slow consumer"
+            );
+            false
+        }
+    }
+}
+
+struct WatchActiveGuard;
+
+impl Drop for WatchActiveGuard {
+    fn drop(&mut self) {
+        metrics::dec_watch_active_streams();
+    }
+}
+
+async fn send_watch_lagged_cancel(
+    tx: &mpsc::Sender<Result<WatchResponse, Status>>,
+    watch_id: i64,
+    stream_capacity: usize,
+    slow_cancel_grace: Duration,
+    compact_revision: i64,
+    cancel_reason: String,
+) -> bool {
+    send_watch_response_with_backpressure(
+        tx,
+        WatchResponse {
+            header: None,
+            watch_id,
+            created: false,
+            canceled: true,
+            compact_revision,
+            cancel_reason,
+            events: Vec::new(),
+        },
+        watch_id,
+        stream_capacity,
+        slow_cancel_grace,
+    )
+    .await
+}
+
+fn build_shared_watch_route_key(
+    tenant: &Option<String>,
+    filter: &WatchFilter,
+    include_prev_kv: bool,
+) -> SharedWatchRouteKey {
+    SharedWatchRouteKey {
+        tenant: tenant.clone(),
+        key: filter.key.clone(),
+        range_end: filter.range_end.clone(),
+        include_prev_kv,
+    }
+}
+
+fn watch_events_to_pb_batch(
+    batch: &[Arc<WatchEvent>],
+    tenanting: Tenanting,
+    tenant: &Option<String>,
+    include_prev_kv: bool,
+    min_revision: i64,
+) -> Option<(Vec<Event>, i64, i64, u64)> {
+    let mut events = Vec::with_capacity(batch.len());
+    let mut first_revision = 0_i64;
+    let mut batch_revision = 0_i64;
+    let mut latest_commit_ts_micros = 0_u64;
+
+    for ev in batch {
+        if ev.mod_revision < min_revision {
+            continue;
+        }
+        if first_revision == 0 {
+            first_revision = ev.mod_revision;
+        }
+        batch_revision = ev.mod_revision;
+        latest_commit_ts_micros = latest_commit_ts_micros.max(ev.commit_ts_micros);
+        let logical_key = tenanting.decode_key(tenant.as_deref(), &ev.key);
+        events.push(to_pb_event(ev.as_ref(), logical_key, include_prev_kv));
+    }
+
+    if events.is_empty() {
+        None
+    } else {
+        Some((
+            events,
+            first_revision,
+            batch_revision,
+            latest_commit_ts_micros,
+        ))
+    }
+}
+
+fn build_shared_watch_batch(
+    batch: Vec<Arc<WatchEvent>>,
+    tenanting: Tenanting,
+    route_key: &SharedWatchRouteKey,
+) -> Option<Arc<SharedWatchBatch>> {
+    let (full_events, first_revision, batch_revision, latest_commit_ts_micros) =
+        watch_events_to_pb_batch(
+            &batch,
+            tenanting,
+            &route_key.tenant,
+            route_key.include_prev_kv,
+            i64::MIN,
+        )?;
+    Some(Arc::new(SharedWatchBatch {
+        raw_events: Arc::new(batch),
+        full_events: Arc::new(full_events),
+        first_revision,
+        batch_revision,
+        latest_commit_ts_micros,
+    }))
+}
+
+async fn send_shared_watch_live_batch(
+    subscriber: &SharedWatchSubscriber,
+    cluster_id: u64,
+    member_id: u64,
+    batch_revision: i64,
+    latest_commit_ts_micros: u64,
+    events: &[Event],
+) -> bool {
+    let lag_ms = now_micros().saturating_sub(latest_commit_ts_micros) / 1_000;
+    metrics::observe_watch_emit_lag_ms(lag_ms);
+    send_watch_response_with_backpressure(
+        &subscriber.tx,
+        WatchResponse {
+            header: Some(ResponseHeader {
+                cluster_id,
+                member_id,
+                revision: batch_revision,
+                raft_term: 1,
+            }),
+            watch_id: subscriber.watch_id,
+            created: false,
+            canceled: false,
+            compact_revision: 0,
+            cancel_reason: String::new(),
+            events: events.to_vec(),
+        },
+        subscriber.watch_id,
+        subscriber.stream_capacity,
+        subscriber.slow_cancel_grace,
+    )
+    .await
+}
+
+async fn dispatch_shared_watch_batch_chunk(
+    subscribers: Vec<SharedWatchSubscriber>,
+    batch: Arc<SharedWatchBatch>,
+    tenanting: Tenanting,
+    route_key: SharedWatchRouteKey,
+    cluster_id: u64,
+    member_id: u64,
+) -> Vec<SharedWatchDispatchOutcome> {
+    let mut outcomes = Vec::with_capacity(subscribers.len());
+    for subscriber in subscribers {
+        let mut next_start_revision = subscriber.start_revision;
+        let send_ok = if subscriber.start_revision <= batch.first_revision {
+            send_shared_watch_live_batch(
+                &subscriber,
+                cluster_id,
+                member_id,
+                batch.batch_revision,
+                batch.latest_commit_ts_micros,
+                batch.full_events.as_ref().as_slice(),
+            )
+            .await
+        } else if subscriber.start_revision > batch.batch_revision {
+            true
+        } else if let Some((events, _first_revision, batch_revision, latest_commit_ts)) =
+            watch_events_to_pb_batch(
+                batch.raw_events.as_ref().as_slice(),
+                tenanting,
+                &route_key.tenant,
+                route_key.include_prev_kv,
+                subscriber.start_revision,
+            )
+        {
+            let sent = send_shared_watch_live_batch(
+                &subscriber,
+                cluster_id,
+                member_id,
+                batch_revision,
+                latest_commit_ts,
+                events.as_slice(),
+            )
+            .await;
+            if sent {
+                next_start_revision = batch_revision.saturating_add(1);
+            }
+            outcomes.push(SharedWatchDispatchOutcome {
+                watch_id: subscriber.watch_id,
+                next_start_revision,
+                closed: !sent,
+            });
+            continue;
+        } else {
+            true
+        };
+
+        if send_ok && subscriber.start_revision <= batch.batch_revision {
+            next_start_revision = batch.batch_revision.saturating_add(1);
+        }
+        outcomes.push(SharedWatchDispatchOutcome {
+            watch_id: subscriber.watch_id,
+            next_start_revision,
+            closed: !send_ok,
+        });
+    }
+    outcomes
+}
+
+async fn replay_shared_watch_recent_events(
+    subscriber: &SharedWatchSubscriber,
+    recent: &VecDeque<Arc<WatchEvent>>,
+    tenanting: Tenanting,
+    tenant: &Option<String>,
+    include_prev_kv: bool,
+    cluster_id: u64,
+    member_id: u64,
+    emit_batch_max: usize,
+) -> bool {
+    if recent.is_empty() {
+        return true;
+    }
+    let mut replay = Vec::with_capacity(emit_batch_max.max(1));
+    for ev in recent.iter() {
+        if ev.mod_revision < subscriber.start_revision {
+            continue;
+        }
+        replay.push(ev.clone());
+        if replay.len() >= emit_batch_max.max(1) {
+            if let Some((events, _first_revision, batch_revision, latest_commit_ts)) =
+                watch_events_to_pb_batch(
+                    &replay,
+                    tenanting,
+                    tenant,
+                    include_prev_kv,
+                    subscriber.start_revision,
+                )
+            {
+                if !send_shared_watch_live_batch(
+                    subscriber,
+                    cluster_id,
+                    member_id,
+                    batch_revision,
+                    latest_commit_ts,
+                    &events,
+                )
+                .await
+                {
+                    return false;
+                }
+            }
+            replay.clear();
+        }
+    }
+    if let Some((events, _first_revision, batch_revision, latest_commit_ts)) =
+        watch_events_to_pb_batch(
+            &replay,
+            tenanting,
+            tenant,
+            include_prev_kv,
+            subscriber.start_revision,
+        )
+    {
+        return send_shared_watch_live_batch(
+            subscriber,
+            cluster_id,
+            member_id,
+            batch_revision,
+            latest_commit_ts,
+            &events,
+        )
+        .await;
+    }
+    true
+}
+
+async fn run_shared_watch_route(
+    routes: SharedWatchRouteRegistry,
+    route_key: SharedWatchRouteKey,
+    mut live_rx: WatchReceiver,
+    mut cmd_rx: mpsc::UnboundedReceiver<SharedWatchRouteCommand>,
+    tenanting: Tenanting,
+    cluster_id: u64,
+    member_id: u64,
+    dispatch_workers: usize,
+    emit_batch_max: usize,
+) {
+    let mut subscribers: HashMap<i64, SharedWatchSubscriber> = HashMap::new();
+    let mut recent = VecDeque::with_capacity(SHARED_WATCH_ROUTE_RECENT_CAPACITY);
+
+    loop {
+        tokio::select! {
+            cmd = cmd_rx.recv() => {
+                match cmd {
+                    Some(SharedWatchRouteCommand::Register(subscriber)) => {
+                        if replay_shared_watch_recent_events(
+                            &subscriber,
+                            &recent,
+                            tenanting,
+                            &route_key.tenant,
+                            route_key.include_prev_kv,
+                            cluster_id,
+                            member_id,
+                            emit_batch_max,
+                        ).await {
+                            subscribers.insert(subscriber.watch_id, subscriber);
+                        }
+                    }
+                    Some(SharedWatchRouteCommand::Unregister(watch_id)) => {
+                        subscribers.remove(&watch_id);
+                        if subscribers.is_empty() {
+                            break;
+                        }
+                    }
+                    None => break,
+                }
+            }
+            recv = live_rx.recv() => {
+                let first = match recv {
+                    Ok(first) => first,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        metrics::inc_watch_lagged_total();
+                        metrics::add_watch_lagged_skipped_events(skipped as u64);
+                        warn!(skipped, route_key = %String::from_utf8_lossy(&route_key.key), "shared watch route lagged behind live ring");
+                        for subscriber in subscribers.values() {
+                            let _ = send_watch_lagged_cancel(
+                                &subscriber.tx,
+                                subscriber.watch_id,
+                                subscriber.stream_capacity,
+                                subscriber.slow_cancel_grace,
+                                0,
+                                "watch canceled after shared route lag".to_string(),
+                            ).await;
+                        }
+                        break;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+
+                let mut batch = Vec::with_capacity(emit_batch_max.max(1));
+                batch.push(first);
+                while batch.len() < emit_batch_max.max(1) {
+                    match live_rx.try_recv() {
+                        Ok(next) => batch.push(next),
+                        Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
+                            metrics::inc_watch_lagged_total();
+                            metrics::add_watch_lagged_skipped_events(skipped as u64);
+                            warn!(skipped, route_key = %String::from_utf8_lossy(&route_key.key), "shared watch route lagged during drain");
+                            break;
+                        }
+                        Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+                    }
+                }
+
+                for ev in &batch {
+                    if recent.len() >= SHARED_WATCH_ROUTE_RECENT_CAPACITY {
+                        recent.pop_front();
+                    }
+                    recent.push_back(ev.clone());
+                }
+
+                let Some(shared_batch) = build_shared_watch_batch(batch, tenanting, &route_key)
+                else {
+                    continue;
+                };
+
+                let snapshot = subscribers.values().cloned().collect::<Vec<_>>();
+                let worker_count = dispatch_workers.max(1).min(snapshot.len().max(1));
+                let mut outcomes = Vec::with_capacity(snapshot.len());
+                if worker_count == 1 || snapshot.len() <= 1 {
+                    outcomes = dispatch_shared_watch_batch_chunk(
+                        snapshot,
+                        shared_batch,
+                        tenanting,
+                        route_key.clone(),
+                        cluster_id,
+                        member_id,
+                    )
+                    .await;
+                } else {
+                    let chunk_size = (snapshot.len() + worker_count - 1) / worker_count;
+                    let mut handles = Vec::with_capacity(worker_count);
+                    for chunk in snapshot.chunks(chunk_size.max(1)) {
+                        let chunk_subscribers = chunk.to_vec();
+                        let chunk_watch_ids = chunk_subscribers
+                            .iter()
+                            .map(|subscriber| subscriber.watch_id)
+                            .collect::<Vec<_>>();
+                        handles.push((
+                            chunk_watch_ids,
+                            tokio::spawn(dispatch_shared_watch_batch_chunk(
+                                chunk_subscribers,
+                                shared_batch.clone(),
+                                tenanting,
+                                route_key.clone(),
+                                cluster_id,
+                                member_id,
+                            )),
+                        ));
+                    }
+
+                    for (watch_ids, handle) in handles {
+                        match handle.await {
+                            Ok(chunk_outcomes) => outcomes.extend(chunk_outcomes),
+                            Err(err) => {
+                                warn!(
+                                    error = %err,
+                                    route_key = %String::from_utf8_lossy(&route_key.key),
+                                    "shared watch dispatch worker join failure"
+                                );
+                                outcomes.extend(watch_ids.into_iter().map(|watch_id| {
+                                    SharedWatchDispatchOutcome {
+                                        watch_id,
+                                        next_start_revision: 0,
+                                        closed: true,
+                                    }
+                                }));
+                            }
+                        }
+                    }
+                }
+
+                for outcome in outcomes {
+                    if outcome.closed {
+                        subscribers.remove(&outcome.watch_id);
+                    } else if let Some(subscriber) = subscribers.get_mut(&outcome.watch_id) {
+                        subscriber.start_revision = outcome.next_start_revision;
+                    }
+                }
+                if subscribers.is_empty() {
+                    break;
+                }
+            }
+        }
+    }
+
+    routes.lock().await.remove(&route_key);
+}
+
+async fn resync_watch_stream_current(
+    store: &Arc<KvStore>,
+    tenanting: Tenanting,
+    tenant: &Option<String>,
+    filter_key: &[u8],
+    filter_range_end: &[u8],
+    watch_id: i64,
+    include_prev_kv: bool,
+    resync_limit: usize,
+    tx: &mpsc::Sender<Result<WatchResponse, Status>>,
+    cluster_id: u64,
+    member_id: u64,
+    stream_capacity: usize,
+    slow_cancel_grace: Duration,
+    emit_batch_max: usize,
+) -> bool {
+    metrics::inc_watch_resync_total();
+    let range = match store.range(
+        filter_key,
+        filter_range_end,
+        resync_limit.saturating_add(1) as i64,
+        0,
+        false,
+        false,
+    ) {
+        Ok(range) => range,
+        Err(err) => {
+            return send_watch_lagged_cancel(
+                tx,
+                watch_id,
+                stream_capacity,
+                slow_cancel_grace,
+                store.compact_revision(),
+                format!("watch resync failed after lag: {err}"),
+            )
+            .await
+        }
+    };
+
+    if range.kvs.len() > resync_limit {
+        return send_watch_lagged_cancel(
+            tx,
+            watch_id,
+            stream_capacity,
+            slow_cancel_grace,
+            0,
+            format!(
+                "watch lag resync exceeded limit ({} > {})",
+                range.kvs.len(),
+                resync_limit
+            ),
+        )
+        .await;
+    }
+
+    metrics::add_watch_resync_keys(range.kvs.len() as u64);
+
+    if range.kvs.is_empty() {
+        return send_watch_response_with_backpressure(
+            tx,
+            WatchResponse {
+                header: Some(ResponseHeader {
+                    cluster_id,
+                    member_id,
+                    revision: range.revision,
+                    raft_term: 1,
+                }),
+                watch_id,
+                created: false,
+                canceled: false,
+                compact_revision: 0,
+                cancel_reason: String::new(),
+                events: Vec::new(),
+            },
+            watch_id,
+            stream_capacity,
+            slow_cancel_grace,
+        )
+        .await;
+    }
+
+    let mut batch_events = Vec::with_capacity(emit_batch_max.max(1));
+    let mut batch_revision = range.revision;
+    for (key, value) in range.kvs {
+        batch_revision = batch_revision.max(value.mod_revision);
+        let logical_key = tenanting.decode_key(tenant.as_deref(), &key);
+        batch_events.push(to_pb_event_from_value(logical_key, value, include_prev_kv));
+        if batch_events.len() >= emit_batch_max.max(1) {
+            if !send_watch_response_with_backpressure(
+                tx,
+                WatchResponse {
+                    header: Some(ResponseHeader {
+                        cluster_id,
+                        member_id,
+                        revision: batch_revision,
+                        raft_term: 1,
+                    }),
+                    watch_id,
+                    created: false,
+                    canceled: false,
+                    compact_revision: 0,
+                    cancel_reason: String::new(),
+                    events: std::mem::take(&mut batch_events),
+                },
+                watch_id,
+                stream_capacity,
+                slow_cancel_grace,
+            )
+            .await
+            {
+                return false;
+            }
+        }
+    }
+
+    if batch_events.is_empty() {
+        return true;
+    }
+
+    send_watch_response_with_backpressure(
+        tx,
+        WatchResponse {
+            header: Some(ResponseHeader {
+                cluster_id,
+                member_id,
+                revision: batch_revision,
+                raft_term: 1,
+            }),
+            watch_id,
+            created: false,
+            canceled: false,
+            compact_revision: 0,
+            cancel_reason: String::new(),
+            events: batch_events,
+        },
+        watch_id,
+        stream_capacity,
+        slow_cancel_grace,
+    )
+    .await
 }
 
 #[tonic::async_trait]
@@ -4111,6 +5705,25 @@ impl Watch for EtcdWatchService {
         request: Request<Streaming<WatchRequest>>,
     ) -> Result<Response<Self::WatchStream>, Status> {
         metrics::inc_request_watch_total();
+        let current_leader = self.raft.current_leader().await;
+        let is_leader = current_leader == Some(self.member_id);
+        let accepted = match self.watch_accept_role {
+            WatchAcceptRole::All => true,
+            WatchAcceptRole::LeaderOnly => is_leader,
+            WatchAcceptRole::FollowerOnly => !is_leader,
+        };
+        if !accepted {
+            metrics::inc_watch_delegate_reject_total();
+            let hint = self
+                .redirect_hint()
+                .unwrap_or_else(|| "non-leader endpoint".to_string());
+            return Err(Status::failed_precondition(format!(
+                "watch is delegated by role policy; retry against {hint}"
+            )));
+        }
+        if !is_leader {
+            metrics::inc_watch_delegate_accept_total();
+        }
         let tenant = self.tenanting.tenant_from_request(&request)?;
         let mut inbound = request.into_inner();
         let first = inbound
@@ -4128,12 +5741,23 @@ impl Watch for EtcdWatchService {
         };
 
         let watch_id = self.next_watch_id.fetch_add(1, Ordering::SeqCst);
+        let stream_capacity = self.watch_stream_queue_depth.max(4);
+        let emit_batch_max = self.watch_emit_batch_max.max(1);
+        let slow_cancel_grace = if self.watch_slow_cancel_grace.is_zero() {
+            Duration::from_millis(1)
+        } else {
+            self.watch_slow_cancel_grace
+        };
+        let include_prev_kv = create.prev_kv;
+        metrics::set_watch_dispatch_queue_depth(0);
 
         let compact_revision = self.store.compact_revision();
         if create.start_revision > 0 && create.start_revision <= compact_revision {
-            let (tx, rx) = mpsc::channel(4);
-            let _ = tx
-                .send(Ok(WatchResponse {
+            let compact_capacity = stream_capacity.min(8).max(4);
+            let (tx, rx) = mpsc::channel(compact_capacity);
+            let _ = send_watch_response_with_backpressure(
+                &tx,
+                WatchResponse {
                     header: Some(self.header(self.store.current_revision())),
                     watch_id,
                     created: false,
@@ -4141,8 +5765,12 @@ impl Watch for EtcdWatchService {
                     compact_revision,
                     cancel_reason: "required revision has been compacted".to_string(),
                     events: Vec::new(),
-                }))
-                .await;
+                },
+                watch_id,
+                compact_capacity,
+                slow_cancel_grace,
+            )
+            .await;
             return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
         }
 
@@ -4161,44 +5789,188 @@ impl Watch for EtcdWatchService {
             start_revision,
         };
 
-        let mut sub = self.store.subscribe_watch(filter.clone());
-        let (tx, rx) = mpsc::channel(1024);
+        let live_only_shared_route = create.start_revision <= 0 && !include_prev_kv;
+        let shared_route_key = live_only_shared_route
+            .then(|| build_shared_watch_route_key(&tenant, &filter, include_prev_kv));
+        let mut sub = (!live_only_shared_route).then(|| self.store.subscribe_watch(filter.clone()));
+        let (tx, rx) = mpsc::channel(stream_capacity);
 
-        tx.send(Ok(WatchResponse {
-            header: Some(self.header(self.store.current_revision())),
+        if !send_watch_response_with_backpressure(
+            &tx,
+            WatchResponse {
+                header: Some(self.header(self.store.current_revision())),
+                watch_id,
+                created: true,
+                canceled: false,
+                compact_revision,
+                cancel_reason: String::new(),
+                events: Vec::new(),
+            },
             watch_id,
-            created: true,
-            canceled: false,
-            compact_revision,
-            cancel_reason: String::new(),
-            events: Vec::new(),
-        }))
+            stream_capacity,
+            slow_cancel_grace,
+        )
         .await
-        .map_err(|_| Status::internal("watch channel closed"))?;
+        {
+            return Err(Status::internal("watch channel closed"));
+        }
+        metrics::inc_watch_active_streams();
 
-        for ev in sub.backlog.drain(..) {
+        if let Some(route_key) = shared_route_key.clone() {
+            self.register_shared_live_subscriber(
+                route_key,
+                filter.clone(),
+                SharedWatchSubscriber {
+                    watch_id,
+                    start_revision,
+                    tx: tx.clone(),
+                    stream_capacity,
+                    slow_cancel_grace,
+                },
+            )
+            .await?;
+        }
+
+        let mut backlog_events = Vec::with_capacity(emit_batch_max);
+        let mut backlog_revision = start_revision;
+        let backlog = if let Some(sub) = sub.as_mut() {
+            std::mem::take(&mut sub.backlog)
+        } else {
+            Vec::new()
+        };
+        for ev in backlog {
             if !filter.matches(ev.key.as_slice()) {
                 continue;
             }
+            let lag_ms = now_micros().saturating_sub(ev.commit_ts_micros) / 1_000;
+            metrics::observe_watch_emit_lag_ms(lag_ms);
             let logical_key = self.tenanting.decode_key(tenant.as_deref(), &ev.key);
-            tx.send(Ok(WatchResponse {
-                header: Some(self.header(ev.mod_revision)),
+            backlog_revision = ev.mod_revision;
+            backlog_events.push(to_pb_event(&ev, logical_key, include_prev_kv));
+            if backlog_events.len() >= emit_batch_max {
+                if !send_watch_response_with_backpressure(
+                    &tx,
+                    WatchResponse {
+                        header: Some(self.header(backlog_revision)),
+                        watch_id,
+                        created: false,
+                        canceled: false,
+                        compact_revision: 0,
+                        cancel_reason: String::new(),
+                        events: std::mem::take(&mut backlog_events),
+                    },
+                    watch_id,
+                    stream_capacity,
+                    slow_cancel_grace,
+                )
+                .await
+                {
+                    return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
+                }
+            }
+        }
+        if !backlog_events.is_empty()
+            && !send_watch_response_with_backpressure(
+                &tx,
+                WatchResponse {
+                    header: Some(self.header(backlog_revision)),
+                    watch_id,
+                    created: false,
+                    canceled: false,
+                    compact_revision: 0,
+                    cancel_reason: String::new(),
+                    events: backlog_events,
+                },
                 watch_id,
-                created: false,
-                canceled: false,
-                compact_revision: 0,
-                cancel_reason: String::new(),
-                events: vec![to_pb_event(&ev, logical_key)],
-            }))
+                stream_capacity,
+                slow_cancel_grace,
+            )
             .await
-            .map_err(|_| Status::internal("watch channel closed"))?;
+        {
+            return Ok(Response::new(Box::pin(ReceiverStream::new(rx))));
         }
 
         let cluster_id = self.cluster_id;
         let member_id = self.member_id;
         let tenanting = self.tenanting;
         let tenant = tenant.clone();
+        let filter_key = filter.key.clone();
+        let filter_range_end = filter.range_end.clone();
+        let store = self.store.clone();
+        let watch_lagged_policy = self.watch_lagged_policy;
+        let watch_lagged_resync_limit = self.watch_lagged_resync_limit;
+        let shared_live_routes = self.shared_live_routes.clone();
         tokio::spawn(async move {
+            let _watch_guard = WatchActiveGuard;
+            if let Some(route_key) = shared_route_key {
+                loop {
+                    match inbound.message().await {
+                        Ok(Some(msg)) => match msg.request_union {
+                            Some(RequestUnion::CancelRequest(c)) if c.watch_id == watch_id => {
+                                let _ = send_watch_response_with_backpressure(
+                                    &tx,
+                                    WatchResponse {
+                                        header: None,
+                                        watch_id,
+                                        created: false,
+                                        canceled: true,
+                                        compact_revision: 0,
+                                        cancel_reason: "watch canceled".to_string(),
+                                        events: Vec::new(),
+                                    },
+                                    watch_id,
+                                    stream_capacity,
+                                    slow_cancel_grace,
+                                )
+                                .await;
+                                break;
+                            }
+                            Some(RequestUnion::ProgressRequest(_)) => {
+                                if !send_watch_response_with_backpressure(
+                                    &tx,
+                                    WatchResponse {
+                                        header: None,
+                                        watch_id,
+                                        created: false,
+                                        canceled: false,
+                                        compact_revision: 0,
+                                        cancel_reason: String::new(),
+                                        events: Vec::new(),
+                                    },
+                                    watch_id,
+                                    stream_capacity,
+                                    slow_cancel_grace,
+                                )
+                                .await
+                                {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        },
+                        Ok(None) => break,
+                        Err(err) => {
+                            let _ = tx
+                                .send(Err(Status::internal(format!("watch stream error: {err}"))))
+                                .await;
+                            break;
+                        }
+                    }
+                }
+
+                let cmd_tx = {
+                    let routes = shared_live_routes.lock().await;
+                    routes.get(&route_key).cloned()
+                };
+                if let Some(cmd_tx) = cmd_tx {
+                    let _ = cmd_tx.send(SharedWatchRouteCommand::Unregister(watch_id));
+                }
+                return;
+            }
+
+            let Some(mut sub) = sub else {
+                return;
+            };
             loop {
                 tokio::select! {
                     inbound_msg = inbound.message() => {
@@ -4206,27 +5978,41 @@ impl Watch for EtcdWatchService {
                             Ok(Some(msg)) => {
                                 match msg.request_union {
                                     Some(RequestUnion::CancelRequest(c)) if c.watch_id == watch_id => {
-                                        let _ = tx.send(Ok(WatchResponse {
-                                            header: None,
+                                        let _ = send_watch_response_with_backpressure(
+                                            &tx,
+                                            WatchResponse {
+                                                header: None,
+                                                watch_id,
+                                                created: false,
+                                                canceled: true,
+                                                compact_revision: 0,
+                                                cancel_reason: "watch canceled".to_string(),
+                                                events: Vec::new(),
+                                            },
                                             watch_id,
-                                            created: false,
-                                            canceled: true,
-                                            compact_revision: 0,
-                                            cancel_reason: "watch canceled".to_string(),
-                                            events: Vec::new(),
-                                        })).await;
+                                            stream_capacity,
+                                            slow_cancel_grace,
+                                        ).await;
                                         break;
                                     }
                                     Some(RequestUnion::ProgressRequest(_)) => {
-                                        let _ = tx.send(Ok(WatchResponse {
-                                            header: None,
+                                        if !send_watch_response_with_backpressure(
+                                            &tx,
+                                            WatchResponse {
+                                                header: None,
+                                                watch_id,
+                                                created: false,
+                                                canceled: false,
+                                                compact_revision: 0,
+                                                cancel_reason: String::new(),
+                                                events: Vec::new(),
+                                            },
                                             watch_id,
-                                            created: false,
-                                            canceled: false,
-                                            compact_revision: 0,
-                                            cancel_reason: String::new(),
-                                            events: Vec::new(),
-                                        })).await;
+                                            stream_capacity,
+                                            slow_cancel_grace,
+                                        ).await {
+                                            break;
+                                        }
                                     }
                                     _ => {}
                                 }
@@ -4240,34 +6026,154 @@ impl Watch for EtcdWatchService {
                     }
                     recv = sub.receiver.recv() => {
                         match recv {
-                            Ok(ev) => {
-                                if ev.mod_revision < start_revision {
-                                    continue;
-                                }
-                                if !key_in_range(ev.key.as_slice(), &filter.key, &filter.range_end) {
-                                    continue;
-                                }
-                                let logical_key = tenanting.decode_key(tenant.as_deref(), &ev.key);
+                            Ok(first_ev) => {
+                                let mut batch_events = Vec::with_capacity(emit_batch_max);
+                                let mut batch_revision = 0_i64;
+                                let mut stream_closed = false;
+                                let mut resynced = false;
 
-                                if tx.send(Ok(WatchResponse {
-                                    header: Some(ResponseHeader {
-                                        cluster_id,
-                                        member_id,
-                                        revision: ev.mod_revision,
-                                        raft_term: 1,
-                                    }),
+                                let push_event = |ev: Arc<astra_core::watch::WatchEvent>,
+                                                  batch_events: &mut Vec<Event>,
+                                                  batch_revision: &mut i64| {
+                                    if ev.mod_revision < start_revision {
+                                        return;
+                                    }
+                                    if !key_in_range(ev.key.as_slice(), &filter_key, &filter_range_end) {
+                                        return;
+                                    }
+                                    let lag_ms = now_micros().saturating_sub(ev.commit_ts_micros) / 1_000;
+                                    metrics::observe_watch_emit_lag_ms(lag_ms);
+                                    let logical_key = tenanting.decode_key(tenant.as_deref(), &ev.key);
+                                    *batch_revision = ev.mod_revision;
+                                    batch_events.push(to_pb_event(ev.as_ref(), logical_key, include_prev_kv));
+                                };
+
+                                push_event(first_ev, &mut batch_events, &mut batch_revision);
+                                while batch_events.len() < emit_batch_max {
+                                    match sub.receiver.try_recv() {
+                                        Ok(next) => {
+                                            push_event(next, &mut batch_events, &mut batch_revision)
+                                        }
+                                        Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                                        Err(tokio::sync::broadcast::error::TryRecvError::Lagged(skipped)) => {
+                                            metrics::inc_watch_lagged_total();
+                                            metrics::add_watch_lagged_skipped_events(skipped as u64);
+                                            warn!(skipped, watch_id, policy = %watch_lagged_policy.as_str(), "watch receiver lagged behind ring events");
+                                            match watch_lagged_policy {
+                                                WatchLaggedPolicy::Warn => {}
+                                                WatchLaggedPolicy::Cancel => {
+                                                    let _ = send_watch_lagged_cancel(
+                                                        &tx,
+                                                        watch_id,
+                                                        stream_capacity,
+                                                        slow_cancel_grace,
+                                                        store.compact_revision(),
+                                                        "watch canceled after lagging behind event ring".to_string(),
+                                                    ).await;
+                                                    return;
+                                                }
+                                                WatchLaggedPolicy::ResyncCurrent => {
+                                                    if !resync_watch_stream_current(
+                                                        &store,
+                                                        tenanting,
+                                                        &tenant,
+                                                        &filter_key,
+                                                        &filter_range_end,
+                                                        watch_id,
+                                                        include_prev_kv,
+                                                        watch_lagged_resync_limit,
+                                                        &tx,
+                                                        cluster_id,
+                                                        member_id,
+                                                        stream_capacity,
+                                                        slow_cancel_grace,
+                                                        emit_batch_max,
+                                                    ).await {
+                                                        return;
+                                                    }
+                                                    batch_events.clear();
+                                                    batch_revision = 0;
+                                                    resynced = true;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        Err(tokio::sync::broadcast::error::TryRecvError::Closed) => {
+                                            stream_closed = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if resynced {
+                                    continue;
+                                }
+
+                                if !batch_events.is_empty() && !send_watch_response_with_backpressure(
+                                    &tx,
+                                    WatchResponse {
+                                        header: Some(ResponseHeader {
+                                            cluster_id,
+                                            member_id,
+                                            revision: batch_revision,
+                                            raft_term: 1,
+                                        }),
+                                        watch_id,
+                                        created: false,
+                                        canceled: false,
+                                        compact_revision: 0,
+                                        cancel_reason: String::new(),
+                                        events: batch_events,
+                                    },
                                     watch_id,
-                                    created: false,
-                                    canceled: false,
-                                    compact_revision: 0,
-                                    cancel_reason: String::new(),
-                                    events: vec![to_pb_event(&ev, logical_key)],
-                                })).await.is_err() {
+                                    stream_capacity,
+                                    slow_cancel_grace,
+                                ).await {
+                                    break;
+                                }
+
+                                if stream_closed {
                                     break;
                                 }
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                                warn!(skipped, watch_id, "watch receiver lagged behind ring events");
+                                metrics::inc_watch_lagged_total();
+                                metrics::add_watch_lagged_skipped_events(skipped as u64);
+                                warn!(skipped, watch_id, policy = %watch_lagged_policy.as_str(), "watch receiver lagged behind ring events");
+                                match watch_lagged_policy {
+                                    WatchLaggedPolicy::Warn => {}
+                                    WatchLaggedPolicy::Cancel => {
+                                        let _ = send_watch_lagged_cancel(
+                                            &tx,
+                                            watch_id,
+                                            stream_capacity,
+                                            slow_cancel_grace,
+                                            store.compact_revision(),
+                                            "watch canceled after lagging behind event ring".to_string(),
+                                        ).await;
+                                        break;
+                                    }
+                                    WatchLaggedPolicy::ResyncCurrent => {
+                                        if !resync_watch_stream_current(
+                                            &store,
+                                            tenanting,
+                                            &tenant,
+                                            &filter_key,
+                                            &filter_range_end,
+                                            watch_id,
+                                            include_prev_kv,
+                                            watch_lagged_resync_limit,
+                                            &tx,
+                                            cluster_id,
+                                            member_id,
+                                            stream_capacity,
+                                            slow_cancel_grace,
+                                            emit_batch_max,
+                                        ).await {
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                         }
@@ -4280,7 +6186,7 @@ impl Watch for EtcdWatchService {
     }
 }
 
-fn to_pb_event(ev: &astra_core::watch::WatchEvent, key: Vec<u8>) -> Event {
+fn to_pb_event(ev: &astra_core::watch::WatchEvent, key: Vec<u8>, include_prev_kv: bool) -> Event {
     let (event_type, value) = match ev.kind {
         WatchEventKind::Put => (EventType::Put as i32, ev.value.as_ref().to_vec()),
         WatchEventKind::Delete => (EventType::Delete as i32, Vec::new()),
@@ -4296,7 +6202,7 @@ fn to_pb_event(ev: &astra_core::watch::WatchEvent, key: Vec<u8>) -> Event {
             value,
             lease: ev.lease,
         }),
-        prev_kv: Some(KeyValue {
+        prev_kv: include_prev_kv.then(|| KeyValue {
             key: Vec::new(),
             create_revision: ev.create_revision,
             mod_revision: ev.mod_revision,
@@ -4304,6 +6210,21 @@ fn to_pb_event(ev: &astra_core::watch::WatchEvent, key: Vec<u8>) -> Event {
             value: ev.prev_value.as_ref().to_vec(),
             lease: ev.lease,
         }),
+    }
+}
+
+fn to_pb_event_from_value(key: Vec<u8>, value: ValueEntry, include_prev_kv: bool) -> Event {
+    Event {
+        r#type: EventType::Put as i32,
+        kv: Some(KeyValue {
+            key,
+            create_revision: value.create_revision,
+            mod_revision: value.mod_revision,
+            version: value.version,
+            value: value.value,
+            lease: value.lease,
+        }),
+        prev_kv: include_prev_kv.then(KeyValue::default),
     }
 }
 
@@ -4520,6 +6441,9 @@ async fn main() -> Result<()> {
         low_linger: Duration::from_micros(cfg.wal_low_linger_us),
         pending_limit: cfg.wal_pending_limit,
         segment_bytes: cfg.wal_segment_bytes,
+        checkpoint_enabled: cfg.wal_checkpoint_enabled,
+        checkpoint_trigger_bytes: cfg.wal_checkpoint_trigger_bytes,
+        checkpoint_min_interval: Duration::from_secs(cfg.wal_checkpoint_min_interval_secs),
         io_engine: cfg.wal_io_engine,
         ..Default::default()
     };
@@ -4567,11 +6491,15 @@ async fn main() -> Result<()> {
     let grpc_http2_keepalive_timeout =
         Duration::from_millis(cfg.grpc_http2_keepalive_timeout_ms.max(1));
     let grpc_tcp_keepalive = Duration::from_millis(cfg.grpc_tcp_keepalive_ms.max(1));
+    let grpc_max_decoding_message_bytes = cfg.grpc_max_decoding_message_bytes.max(1024);
+    let grpc_max_encoding_message_bytes = cfg.grpc_max_encoding_message_bytes.max(1024);
     info!(
         grpc_max_concurrent_streams,
         grpc_http2_keepalive_interval_ms = cfg.grpc_http2_keepalive_interval_ms,
         grpc_http2_keepalive_timeout_ms = cfg.grpc_http2_keepalive_timeout_ms,
         grpc_tcp_keepalive_ms = cfg.grpc_tcp_keepalive_ms,
+        grpc_max_decoding_message_bytes,
+        grpc_max_encoding_message_bytes,
         "gRPC transport settings"
     );
 
@@ -4644,12 +6572,25 @@ async fn main() -> Result<()> {
         "l0 write pressure control enabled"
     );
     info!(
+        wal_segment_bytes = cfg.wal_segment_bytes,
+        wal_checkpoint_enabled = cfg.wal_checkpoint_enabled,
+        wal_checkpoint_trigger_bytes = cfg.wal_checkpoint_trigger_bytes,
+        wal_checkpoint_min_interval_secs = cfg.wal_checkpoint_min_interval_secs,
+        "wal checkpoint settings"
+    );
+    info!(
         list_prefix_filter_enabled = cfg.list_prefix_filter_enabled,
         list_revision_filter_enabled = cfg.list_revision_filter_enabled,
         list_prefetch_enabled = cfg.list_prefetch_enabled,
         list_prefetch_pages = cfg.list_prefetch_pages,
         list_prefetch_cache_entries = cfg.list_prefetch_cache_entries,
+        list_stream_enabled = cfg.list_stream_enabled,
+        list_stream_chunk_bytes = cfg.list_stream_chunk_bytes,
         read_isolation_enabled = cfg.read_isolation_enabled,
+        semantic_cache_enabled = cfg.semantic_cache_enabled,
+        semantic_cache_prefixes = cfg.semantic_cache_prefixes.len(),
+        semantic_cache_max_entries = cfg.semantic_cache_max_entries,
+        semantic_cache_max_bytes = cfg.semantic_cache_max_bytes,
         gateway_read_ticket_enabled = cfg.gateway_read_ticket_enabled,
         gateway_read_ticket_ttl_ms = cfg.gateway_read_ticket_ttl_ms,
         gateway_singleflight_enabled = cfg.gateway_singleflight_enabled,
@@ -4666,6 +6607,41 @@ async fn main() -> Result<()> {
         qos_tier0_max_linger_us = cfg.qos_tier0_max_linger_us,
         "profile + semantic qos settings"
     );
+    info!(
+        multi_raft_enabled = cfg.multi_raft_enabled,
+        multi_raft_groups = cfg.multi_raft_groups,
+        multi_raft_default_group = %cfg.multi_raft_default_group,
+        raft_shared_wal_reactor_enabled = cfg.raft_shared_wal_reactor_enabled,
+        watch_accept_role = %cfg.watch_accept_role.as_str(),
+        watch_lagged_policy = %cfg.watch_lagged_policy.as_str(),
+        watch_lagged_resync_limit = cfg.watch_lagged_resync_limit,
+        watch_redirect_hint = ?cfg.watch_redirect_hint,
+        watch_dispatch_workers = cfg.watch_dispatch_workers,
+        watch_stream_queue_depth = cfg.watch_stream_queue_depth,
+        watch_slow_cancel_grace_ms = cfg.watch_slow_cancel_grace_ms,
+        watch_emit_batch_max = cfg.watch_emit_batch_max,
+        "phase12 discovery control settings"
+    );
+    info!(
+        raft_snapshot_max_chunk_bytes = cfg.raft_snapshot_max_chunk_bytes,
+        raft_snapshot_logs_since_last = cfg.raft_snapshot_policy_logs_since_last,
+        raft_max_in_snapshot_log_to_keep = cfg.raft_max_in_snapshot_log_to_keep,
+        raft_purge_batch_size = cfg.raft_purge_batch_size,
+        "raft snapshot recovery settings"
+    );
+    info!(
+        large_value_mode = %cfg.large_value_mode.as_str(),
+        large_value_threshold_bytes = cfg.large_value_threshold_bytes,
+        large_value_upload_chunk_bytes = cfg.large_value_upload_chunk_bytes,
+        large_value_upload_timeout_secs = cfg.large_value_upload_timeout_secs,
+        large_value_hydrate_cache_max_bytes = cfg.large_value_hydrate_cache_max_bytes,
+        "large-value tiering settings"
+    );
+    if cfg.multi_raft_enabled {
+        warn!(
+            "ASTRAD_MULTI_RAFT_ENABLED is set, but this build still runs single-group consensus; use phase12 multiraft harness for external prefix-routed group experiments"
+        );
+    }
 
     let tier_chunk_target = cfg
         .sst_target_bytes
@@ -4769,8 +6745,41 @@ async fn main() -> Result<()> {
         cfg.list_prefetch_pages,
         cfg.list_prefetch_cache_entries,
     );
+    let semantic_hot_cache = SemanticHotCache::new(
+        cfg.semantic_cache_enabled,
+        cfg.semantic_cache_prefixes.clone(),
+        cfg.semantic_cache_max_entries,
+        cfg.semantic_cache_max_bytes,
+    );
     let gateway_read_ticket = GatewayReadTicket::from_config(&cfg);
     let gateway_singleflight = GatewayGetSingleflight::from_config(&cfg);
+    let large_value_tiering = if cfg.large_value_mode == LargeValueMode::Tiered {
+        if let Some(s3_cfg) = cfg.s3.as_ref() {
+            info!(
+                bucket = %s3_cfg.bucket,
+                key_prefix = %s3_cfg.key_prefix,
+                threshold_bytes = cfg.large_value_threshold_bytes,
+                "large-value pointer tiering enabled"
+            );
+            Some(
+                LargeValueTiering::from_config(
+                    s3_cfg,
+                    cfg.large_value_threshold_bytes,
+                    cfg.large_value_upload_chunk_bytes,
+                    cfg.large_value_upload_timeout_secs,
+                    cfg.large_value_hydrate_cache_max_bytes,
+                )
+                .await,
+            )
+        } else {
+            warn!(
+                "large-value pointer tiering requested (ASTRAD_LARGE_VALUE_MODE=tiered) but S3 config is missing; disabling tiering path"
+            );
+            None
+        }
+    } else {
+        None
+    };
     start_profile_governor(
         cfg.clone(),
         put_batcher.clone(),
@@ -4789,13 +6798,17 @@ async fn main() -> Result<()> {
         put_batcher,
         write_pressure: write_pressure.clone(),
         semantic_qos: semantic_qos.clone(),
+        semantic_hot_cache: semantic_hot_cache.clone(),
         list_prefetch_cache: list_prefetch_cache.clone(),
         read_isolation_enabled: cfg.read_isolation_enabled,
         gateway_read_ticket,
         gateway_singleflight,
+        large_value_tiering: large_value_tiering.clone(),
         timeline_enabled: cfg.raft_timeline_enabled,
         timeline_sample_rate: cfg.raft_timeline_sample_rate.max(1),
         timeline_seq: Arc::new(AtomicU64::new(1)),
+        grpc_max_decoding_message_bytes,
+        grpc_max_encoding_message_bytes,
     };
     let lease = EtcdLeaseService {
         store: store.clone(),
@@ -4805,17 +6818,40 @@ async fn main() -> Result<()> {
         tenanting,
         leader_client_by_id: Arc::new(build_leader_client_map(&cfg)),
         write_pressure,
+        semantic_hot_cache: semantic_hot_cache.clone(),
         list_prefetch_cache,
+        grpc_max_decoding_message_bytes,
+        grpc_max_encoding_message_bytes,
     };
 
     let watch = EtcdWatchService {
-        store,
+        store: store.clone(),
+        raft: raft.clone(),
         cluster_id: 1,
         member_id: cfg.node_id,
         tenanting,
+        leader_client_by_id: Arc::new(build_leader_client_map(&cfg)),
+        watch_accept_role: cfg.watch_accept_role,
+        watch_redirect_hint: cfg.watch_redirect_hint.clone(),
+        watch_dispatch_workers: cfg.watch_dispatch_workers.max(1),
+        watch_stream_queue_depth: cfg.watch_stream_queue_depth.max(1),
+        watch_slow_cancel_grace: Duration::from_millis(cfg.watch_slow_cancel_grace_ms.max(1)),
+        watch_emit_batch_max: cfg.watch_emit_batch_max.max(1),
+        watch_lagged_policy: cfg.watch_lagged_policy,
+        watch_lagged_resync_limit: cfg.watch_lagged_resync_limit.max(1),
         next_watch_id: Arc::new(AtomicI64::new(1)),
+        shared_live_routes: Arc::new(AsyncMutex::new(HashMap::new())),
     };
-    let admin = AstraAdminService::new(raft.clone(), cfg.node_id, tenanting, cfg.s3.clone());
+    let admin = AstraAdminService::new(
+        raft.clone(),
+        store.clone(),
+        cfg.node_id,
+        tenanting,
+        cfg.s3.clone(),
+        large_value_tiering.clone(),
+        cfg.list_stream_enabled,
+        cfg.list_stream_chunk_bytes,
+    );
 
     let addr = cfg
         .client_addr
@@ -4826,16 +6862,40 @@ async fn main() -> Result<()> {
     let authz = AuthzInterceptor {
         auth: auth_runtime.clone(),
     };
+    let kv_service = tonic::service::interceptor::InterceptedService::new(
+        KvServer::new(kv)
+            .max_decoding_message_size(grpc_max_decoding_message_bytes)
+            .max_encoding_message_size(grpc_max_encoding_message_bytes),
+        authz.clone(),
+    );
+    let lease_service = tonic::service::interceptor::InterceptedService::new(
+        LeaseServer::new(lease)
+            .max_decoding_message_size(grpc_max_decoding_message_bytes)
+            .max_encoding_message_size(grpc_max_encoding_message_bytes),
+        authz.clone(),
+    );
+    let watch_service = tonic::service::interceptor::InterceptedService::new(
+        WatchServer::new(watch)
+            .max_decoding_message_size(grpc_max_decoding_message_bytes)
+            .max_encoding_message_size(grpc_max_encoding_message_bytes),
+        authz.clone(),
+    );
+    let admin_service = tonic::service::interceptor::InterceptedService::new(
+        AstraAdminServer::new(admin)
+            .max_decoding_message_size(grpc_max_decoding_message_bytes)
+            .max_encoding_message_size(grpc_max_encoding_message_bytes),
+        authz,
+    );
 
     tonic::transport::Server::builder()
         .max_concurrent_streams(grpc_max_concurrent_streams)
         .http2_keepalive_interval(Some(grpc_http2_keepalive_interval))
         .http2_keepalive_timeout(Some(grpc_http2_keepalive_timeout))
         .tcp_keepalive(Some(grpc_tcp_keepalive))
-        .add_service(KvServer::with_interceptor(kv, authz.clone()))
-        .add_service(LeaseServer::with_interceptor(lease, authz.clone()))
-        .add_service(WatchServer::with_interceptor(watch, authz.clone()))
-        .add_service(AstraAdminServer::with_interceptor(admin, authz))
+        .add_service(kv_service)
+        .add_service(lease_service)
+        .add_service(watch_service)
+        .add_service(admin_service)
         .serve(addr)
         .await
         .map_err(|e| {

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package astraadminpb;
 
+import "mvccpb/kv.proto";
+
 message BulkLoadRequest {
   string tenant_id = 1;
   string manifest_source = 2;
@@ -30,7 +32,26 @@ message GetBulkLoadJobResponse {
   uint64 finished_at_unix_ms = 7;
 }
 
+message StreamListRequest {
+  bytes key = 1;
+  bytes range_end = 2;
+  int64 limit = 3;
+  int64 revision = 4;
+  bool keys_only = 5;
+  bool count_only = 6;
+  uint64 page_size_bytes = 7;
+}
+
+message StreamListChunk {
+  int64 revision = 1;
+  repeated mvccpb.KeyValue kvs = 2;
+  bool more = 3;
+  int64 count = 4;
+  bytes next_key = 5;
+}
+
 service AstraAdmin {
   rpc BulkLoad(BulkLoadRequest) returns (BulkLoadResponse);
   rpc GetBulkLoadJob(GetBulkLoadJobRequest) returns (GetBulkLoadJobResponse);
+  rpc StreamList(StreamListRequest) returns (stream StreamListChunk);
 }

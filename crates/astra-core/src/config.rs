@@ -70,6 +70,96 @@ impl FromStr for WatchBacklogMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchAcceptRole {
+    All,
+    LeaderOnly,
+    FollowerOnly,
+}
+
+impl WatchAcceptRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WatchAcceptRole::All => "all",
+            WatchAcceptRole::LeaderOnly => "leader_only",
+            WatchAcceptRole::FollowerOnly => "follower_only",
+        }
+    }
+}
+
+impl FromStr for WatchAcceptRole {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim().to_ascii_lowercase();
+        match s.as_str() {
+            "all" => Ok(Self::All),
+            "leader_only" | "leader-only" | "leader" => Ok(Self::LeaderOnly),
+            "follower_only" | "follower-only" | "follower" | "delegated" => Ok(Self::FollowerOnly),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchLaggedPolicy {
+    Warn,
+    Cancel,
+    ResyncCurrent,
+}
+
+impl WatchLaggedPolicy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WatchLaggedPolicy::Warn => "warn",
+            WatchLaggedPolicy::Cancel => "cancel",
+            WatchLaggedPolicy::ResyncCurrent => "resync_current",
+        }
+    }
+}
+
+impl FromStr for WatchLaggedPolicy {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim().to_ascii_lowercase();
+        match s.as_str() {
+            "warn" | "log" => Ok(Self::Warn),
+            "cancel" | "drop" => Ok(Self::Cancel),
+            "resync_current" | "resync-current" | "resync" | "compress" => Ok(Self::ResyncCurrent),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LargeValueMode {
+    Off,
+    Tiered,
+}
+
+impl LargeValueMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LargeValueMode::Off => "off",
+            LargeValueMode::Tiered => "tiered",
+        }
+    }
+}
+
+impl FromStr for LargeValueMode {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim().to_ascii_lowercase();
+        match s.as_str() {
+            "off" | "disabled" => Ok(Self::Off),
+            "tiered" | "pointer" | "pointer_tiered" | "pointer-tiered" => Ok(Self::Tiered),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PutAdaptiveMode {
     Legacy,
     QueueBacklogDrain,
@@ -144,8 +234,20 @@ pub struct AstraConfig {
     pub watch_ring_capacity: usize,
     pub watch_broadcast_capacity: usize,
     pub watch_backlog_mode: WatchBacklogMode,
+    pub watch_accept_role: WatchAcceptRole,
+    pub watch_redirect_hint: Option<String>,
+    pub watch_dispatch_workers: usize,
+    pub watch_stream_queue_depth: usize,
+    pub watch_slow_cancel_grace_ms: u64,
+    pub watch_emit_batch_max: usize,
+    pub watch_lagged_policy: WatchLaggedPolicy,
+    pub watch_lagged_resync_limit: usize,
     pub tiering_interval_secs: u64,
     pub sst_target_bytes: usize,
+    pub multi_raft_enabled: bool,
+    pub multi_raft_groups: usize,
+    pub multi_raft_default_group: String,
+    pub raft_shared_wal_reactor_enabled: bool,
     pub wal_max_batch_requests: usize,
     pub wal_max_batch_bytes: usize,
     pub wal_max_linger_us: u64,
@@ -153,6 +255,9 @@ pub struct AstraConfig {
     pub wal_low_linger_us: u64,
     pub wal_pending_limit: usize,
     pub wal_segment_bytes: u64,
+    pub wal_checkpoint_enabled: bool,
+    pub wal_checkpoint_trigger_bytes: u64,
+    pub wal_checkpoint_min_interval_secs: u64,
     pub wal_io_engine: WalIoEngine,
     pub bg_io_throttle_enabled: bool,
     pub bg_io_tokens_per_sec: u64,
@@ -176,7 +281,18 @@ pub struct AstraConfig {
     pub list_prefetch_enabled: bool,
     pub list_prefetch_pages: usize,
     pub list_prefetch_cache_entries: usize,
+    pub list_stream_enabled: bool,
+    pub list_stream_chunk_bytes: usize,
     pub read_isolation_enabled: bool,
+    pub semantic_cache_enabled: bool,
+    pub semantic_cache_prefixes: Vec<Vec<u8>>,
+    pub semantic_cache_max_entries: usize,
+    pub semantic_cache_max_bytes: usize,
+    pub large_value_mode: LargeValueMode,
+    pub large_value_threshold_bytes: usize,
+    pub large_value_upload_chunk_bytes: usize,
+    pub large_value_upload_timeout_secs: u64,
+    pub large_value_hydrate_cache_max_bytes: usize,
     pub gateway_read_ticket_enabled: bool,
     pub gateway_read_ticket_ttl_ms: u64,
     pub gateway_singleflight_enabled: bool,
@@ -212,10 +328,16 @@ pub struct AstraConfig {
     pub raft_heartbeat_interval_ms: u64,
     pub raft_max_payload_entries: u64,
     pub raft_replication_lag_threshold: u64,
+    pub raft_snapshot_max_chunk_bytes: u64,
+    pub raft_snapshot_policy_logs_since_last: u64,
+    pub raft_max_in_snapshot_log_to_keep: u64,
+    pub raft_purge_batch_size: u64,
     pub grpc_max_concurrent_streams: u32,
     pub grpc_http2_keepalive_interval_ms: u64,
     pub grpc_http2_keepalive_timeout_ms: u64,
     pub grpc_tcp_keepalive_ms: u64,
+    pub grpc_max_decoding_message_bytes: usize,
+    pub grpc_max_encoding_message_bytes: usize,
     pub chaos_append_ack_delay_enabled: bool,
     pub chaos_append_ack_delay_min_ms: u64,
     pub chaos_append_ack_delay_max_ms: u64,
@@ -263,9 +385,32 @@ impl AstraConfig {
             .ok()
             .and_then(|v| v.parse::<WatchBacklogMode>().ok())
             .unwrap_or(WatchBacklogMode::Relaxed);
+        let watch_accept_role = env::var("ASTRAD_WATCH_ACCEPT_ROLE")
+            .ok()
+            .and_then(|v| v.parse::<WatchAcceptRole>().ok())
+            .unwrap_or(WatchAcceptRole::All);
+        let watch_redirect_hint = opt_env("ASTRAD_WATCH_REDIRECT_HINT");
+        let watch_dispatch_workers = parse_env("ASTRAD_WATCH_DISPATCH_WORKERS", 8_usize).max(1);
+        let watch_stream_queue_depth =
+            parse_env("ASTRAD_WATCH_STREAM_QUEUE_DEPTH", 64_usize).max(1);
+        let watch_slow_cancel_grace_ms =
+            parse_env("ASTRAD_WATCH_SLOW_CANCEL_GRACE_MS", 1_500_u64).max(1);
+        let watch_emit_batch_max = parse_env("ASTRAD_WATCH_EMIT_BATCH_MAX", 256_usize).max(1);
+        let watch_lagged_policy = env::var("ASTRAD_WATCH_LAGGED_POLICY")
+            .ok()
+            .and_then(|v| v.parse::<WatchLaggedPolicy>().ok())
+            .unwrap_or(WatchLaggedPolicy::Warn);
+        let watch_lagged_resync_limit =
+            parse_env("ASTRAD_WATCH_LAGGED_RESYNC_LIMIT", 32_usize).max(1);
         let tiering_interval_secs = parse_env("ASTRAD_TIERING_INTERVAL_SECS", 30_u64);
         let sst_target_bytes =
             parse_env("ASTRAD_SST_TARGET_BYTES", 64 * 1024 * 1024_usize).max(64 * 1024 * 1024);
+        let multi_raft_enabled = parse_env("ASTRAD_MULTI_RAFT_ENABLED", false);
+        let multi_raft_groups = parse_env("ASTRAD_MULTI_RAFT_GROUPS", 3_usize).max(1);
+        let multi_raft_default_group =
+            env::var("ASTRAD_MULTI_RAFT_DEFAULT_GROUP").unwrap_or_else(|_| "default".to_string());
+        let raft_shared_wal_reactor_enabled =
+            parse_env("ASTRAD_RAFT_SHARED_WAL_REACTOR_ENABLED", true);
 
         let wal_max_batch_requests = parse_env(
             "ASTRAD_WAL_MAX_BATCH_REQUESTS",
@@ -281,6 +426,11 @@ impl AstraConfig {
         let wal_pending_limit = parse_env("ASTRAD_WAL_PENDING_LIMIT", 2_000_usize).max(1);
         let wal_segment_bytes =
             parse_env("ASTRAD_WAL_SEGMENT_BYTES", 64 * 1024 * 1024_u64).max(4 * 1024);
+        let wal_checkpoint_enabled = parse_env("ASTRAD_WAL_CHECKPOINT_ENABLED", false);
+        let wal_checkpoint_trigger_bytes =
+            parse_env("ASTRAD_WAL_CHECKPOINT_TRIGGER_BYTES", 512 * 1024 * 1024_u64).max(4 * 1024);
+        let wal_checkpoint_min_interval_secs =
+            parse_env("ASTRAD_WAL_CHECKPOINT_MIN_INTERVAL_SECS", 300_u64).max(1);
         let wal_io_engine = env::var("ASTRAD_WAL_IO_ENGINE")
             .ok()
             .and_then(|v| v.parse::<WalIoEngine>().ok())
@@ -316,7 +466,37 @@ impl AstraConfig {
         let list_prefetch_pages = parse_env("ASTRAD_LIST_PREFETCH_PAGES", 2_usize).max(1);
         let list_prefetch_cache_entries =
             parse_env("ASTRAD_LIST_PREFETCH_CACHE_ENTRIES", 4_096_usize).max(1);
+        let list_stream_enabled = parse_env("ASTRAD_LIST_STREAM_ENABLED", false);
+        let list_stream_chunk_bytes =
+            parse_env("ASTRAD_LIST_STREAM_CHUNK_BYTES", 2 * 1024 * 1024_usize).max(4 * 1024);
         let read_isolation_enabled = parse_env("ASTRAD_READ_ISOLATION_ENABLED", true);
+        let semantic_cache_enabled = parse_env("ASTRAD_SEMANTIC_CACHE_ENABLED", false);
+        let semantic_cache_prefixes = parse_csv_bytes(
+            "ASTRAD_SEMANTIC_CACHE_PREFIXES",
+            &["/registry/configmaps/", "/registry/secrets/"],
+        );
+        let semantic_cache_max_entries =
+            parse_env("ASTRAD_SEMANTIC_CACHE_MAX_ENTRIES", 20_000_usize).max(1);
+        let semantic_cache_max_bytes =
+            parse_env("ASTRAD_SEMANTIC_CACHE_MAX_BYTES", 256 * 1024 * 1024_usize).max(4 * 1024);
+        let large_value_mode = env::var("ASTRAD_LARGE_VALUE_MODE")
+            .ok()
+            .and_then(|v| v.parse::<LargeValueMode>().ok())
+            .unwrap_or(LargeValueMode::Off);
+        let large_value_threshold_bytes =
+            parse_env("ASTRAD_LARGE_VALUE_THRESHOLD_BYTES", 4 * 1024 * 1024_usize).max(1_024);
+        let large_value_upload_chunk_bytes = parse_env(
+            "ASTRAD_LARGE_VALUE_UPLOAD_CHUNK_BYTES",
+            1 * 1024 * 1024_usize,
+        )
+        .max(1_024);
+        let large_value_upload_timeout_secs =
+            parse_env("ASTRAD_LARGE_VALUE_UPLOAD_TIMEOUT_SECS", 120_u64).max(1);
+        let large_value_hydrate_cache_max_bytes = parse_env(
+            "ASTRAD_LARGE_VALUE_HYDRATE_CACHE_MAX_BYTES",
+            512 * 1024 * 1024_usize,
+        )
+        .max(4 * 1024);
         let gateway_read_ticket_enabled = parse_env("ASTRAD_GATEWAY_READ_TICKET_ENABLED", false);
         let gateway_read_ticket_ttl_ms =
             parse_env("ASTRAD_GATEWAY_READ_TICKET_TTL_MS", 20_u64).max(1);
@@ -384,6 +564,13 @@ impl AstraConfig {
             parse_env("ASTRAD_RAFT_MAX_PAYLOAD_ENTRIES", 5_000_u64).max(1);
         let raft_replication_lag_threshold =
             parse_env("ASTRAD_RAFT_REPLICATION_LAG_THRESHOLD", 2_048_u64).max(1);
+        let raft_snapshot_max_chunk_bytes =
+            parse_env("ASTRAD_RAFT_SNAPSHOT_MAX_CHUNK_BYTES", 2 * 1024 * 1024_u64).max(1_024);
+        let raft_snapshot_policy_logs_since_last =
+            parse_env("ASTRAD_RAFT_SNAPSHOT_LOGS_SINCE_LAST", 512_u64).max(1);
+        let raft_max_in_snapshot_log_to_keep =
+            parse_env("ASTRAD_RAFT_MAX_IN_SNAPSHOT_LOG_TO_KEEP", 64_u64).max(0);
+        let raft_purge_batch_size = parse_env("ASTRAD_RAFT_PURGE_BATCH_SIZE", 256_u64).max(1);
         let grpc_max_concurrent_streams =
             parse_env("ASTRAD_GRPC_MAX_CONCURRENT_STREAMS", 65_535_u32).max(64);
         let grpc_http2_keepalive_interval_ms =
@@ -392,6 +579,16 @@ impl AstraConfig {
             parse_env("ASTRAD_GRPC_HTTP2_KEEPALIVE_TIMEOUT_MS", 5_000_u64).max(500);
         let grpc_tcp_keepalive_ms =
             parse_env("ASTRAD_GRPC_TCP_KEEPALIVE_MS", 30_000_u64).max(1_000);
+        let grpc_max_decoding_message_bytes = parse_env(
+            "ASTRAD_GRPC_MAX_DECODING_MESSAGE_BYTES",
+            64 * 1024 * 1024_usize,
+        )
+        .max(1024);
+        let grpc_max_encoding_message_bytes = parse_env(
+            "ASTRAD_GRPC_MAX_ENCODING_MESSAGE_BYTES",
+            64 * 1024 * 1024_usize,
+        )
+        .max(1024);
         let chaos_append_ack_delay_enabled =
             parse_env("ASTRAD_CHAOS_APPEND_ACK_DELAY_ENABLED", false);
         let chaos_append_ack_delay_min_ms =
@@ -439,8 +636,20 @@ impl AstraConfig {
             watch_ring_capacity,
             watch_broadcast_capacity,
             watch_backlog_mode,
+            watch_accept_role,
+            watch_redirect_hint,
+            watch_dispatch_workers,
+            watch_stream_queue_depth,
+            watch_slow_cancel_grace_ms,
+            watch_emit_batch_max,
+            watch_lagged_policy,
+            watch_lagged_resync_limit,
             tiering_interval_secs,
             sst_target_bytes,
+            multi_raft_enabled,
+            multi_raft_groups,
+            multi_raft_default_group,
+            raft_shared_wal_reactor_enabled,
             wal_max_batch_requests,
             wal_max_batch_bytes,
             wal_max_linger_us,
@@ -448,6 +657,9 @@ impl AstraConfig {
             wal_low_linger_us,
             wal_pending_limit,
             wal_segment_bytes,
+            wal_checkpoint_enabled,
+            wal_checkpoint_trigger_bytes,
+            wal_checkpoint_min_interval_secs,
             wal_io_engine,
             bg_io_throttle_enabled,
             bg_io_tokens_per_sec,
@@ -471,7 +683,18 @@ impl AstraConfig {
             list_prefetch_enabled,
             list_prefetch_pages,
             list_prefetch_cache_entries,
+            list_stream_enabled,
+            list_stream_chunk_bytes,
             read_isolation_enabled,
+            semantic_cache_enabled,
+            semantic_cache_prefixes,
+            semantic_cache_max_entries,
+            semantic_cache_max_bytes,
+            large_value_mode,
+            large_value_threshold_bytes,
+            large_value_upload_chunk_bytes,
+            large_value_upload_timeout_secs,
+            large_value_hydrate_cache_max_bytes,
             gateway_read_ticket_enabled,
             gateway_read_ticket_ttl_ms,
             gateway_singleflight_enabled,
@@ -507,10 +730,16 @@ impl AstraConfig {
             raft_heartbeat_interval_ms,
             raft_max_payload_entries,
             raft_replication_lag_threshold,
+            raft_snapshot_max_chunk_bytes,
+            raft_snapshot_policy_logs_since_last,
+            raft_max_in_snapshot_log_to_keep,
+            raft_purge_batch_size,
             grpc_max_concurrent_streams,
             grpc_http2_keepalive_interval_ms,
             grpc_http2_keepalive_timeout_ms,
             grpc_tcp_keepalive_ms,
+            grpc_max_decoding_message_bytes,
+            grpc_max_encoding_message_bytes,
             chaos_append_ack_delay_enabled,
             chaos_append_ack_delay_min_ms,
             chaos_append_ack_delay_max_ms,

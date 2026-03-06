@@ -62,6 +62,16 @@ phase6_detect_blkio_device() {
   echo "${disk}"
 }
 
+phase6_endpoint_for_member_id() {
+  local member_id=${1:-}
+  case "${member_id}" in
+    1) echo "127.0.0.1:${PHASE6_ASTRA_NODE1_PORT:-2379}" ;;
+    2) echo "127.0.0.1:${PHASE6_ASTRA_NODE2_PORT:-32391}" ;;
+    3) echo "127.0.0.1:${PHASE6_ASTRA_NODE3_PORT:-32392}" ;;
+    *) echo "" ;;
+  esac
+}
+
 phase6_find_astra_leader() {
   local attempts=${1:-90}
   local delay=${2:-1}
@@ -70,14 +80,17 @@ phase6_find_astra_leader() {
   local ep3="127.0.0.1:${PHASE6_ASTRA_NODE3_PORT:-32392}"
   local eps=("${ep1}" "${ep2}" "${ep3}")
   local i
+  local probe_key="/phase6/probe/leader/${RUN_ID}/$(date -u +%s)"
 
   for i in $(seq 1 "${attempts}"); do
+    local phase6_leader_candidate=""
     local ep
     for ep in "${eps[@]}"; do
-      local out
-      if out=$(etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${ep}" --write-out=json put "/phase6/probe/leader" "${RUN_ID}" 2>/dev/null); then
-        local member_id
-        member_id=$(python3 - <<'PY' "${out}"
+      local put_json=""
+      put_json=$(etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${ep}" -w json put "${probe_key}" "${RUN_ID}" 2>/dev/null || true)
+      if [ -n "${put_json}" ]; then
+        local member_id=""
+        member_id=$(python3 - <<'PY' "${put_json}"
 import json
 import sys
 
@@ -86,22 +99,36 @@ try:
 except Exception:
     print("")
     raise SystemExit(0)
-
 header = obj.get("header") or {}
-mid = header.get("member_id")
-if mid is None:
-    mid = header.get("memberId")
-print("" if mid is None else str(mid))
+print(header.get("member_id") or header.get("memberId") or "")
 PY
 )
-        case "${member_id}" in
-          1) echo "${ep1}"; return 0 ;;
-          2) echo "${ep2}"; return 0 ;;
-          3) echo "${ep3}"; return 0 ;;
-          *) echo "${ep}"; return 0 ;;
-        esac
+        local leader_ep=""
+        leader_ep=$(phase6_endpoint_for_member_id "${member_id}")
+        # Ensure we select an endpoint from the Astra cluster rather than a
+        # foreign etcd that might also be reachable on localhost.
+        local peer
+        for peer in "${eps[@]}"; do
+          [ "${peer}" = "${ep}" ] && continue
+          local got
+          got=$(etcdctl --dial-timeout=1s --command-timeout=3s --endpoints="${peer}" get "${probe_key}" --print-value-only 2>/dev/null | tr -d '\r' | tail -n 1 || true)
+          if [ "${got}" = "${RUN_ID}" ]; then
+            echo "${leader_ep:-${ep}}"
+            return 0
+          fi
+        done
+
+        # If the peer replication check is inconclusive during startup, keep
+        # this endpoint as a fallback candidate for the current attempt.
+        if [ -z "${phase6_leader_candidate:-}" ]; then
+          phase6_leader_candidate="${leader_ep:-${ep}}"
+        fi
       fi
     done
+    if [ -n "${phase6_leader_candidate:-}" ]; then
+      echo "${phase6_leader_candidate}"
+      return 0
+    fi
     sleep "${delay}"
   done
 

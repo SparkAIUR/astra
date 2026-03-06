@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,9 @@ use crate::config::WatchBacklogMode;
 use crate::errors::StoreError;
 use crate::memory::{MemoryPressure, MemoryTracker};
 use crate::metrics;
-use crate::watch::{WatchEvent, WatchEventKind, WatchFilter, WatchRing, WatchSubscription};
+use crate::watch::{
+    WatchEvent, WatchEventKind, WatchFilter, WatchReceiver, WatchRing, WatchSubscription,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueEntry {
@@ -327,6 +330,7 @@ impl KvStore {
             prev_value: Arc::<[u8]>::from(
                 prev.as_ref().map(|v| v.value.clone()).unwrap_or_default(),
             ),
+            commit_ts_micros: now_micros(),
             create_revision: current.create_revision,
             mod_revision: current.mod_revision,
             version: current.version,
@@ -489,6 +493,7 @@ impl KvStore {
                 key: k.clone(),
                 value: Arc::<[u8]>::from(Vec::<u8>::new()),
                 prev_value: Arc::<[u8]>::from(v.value.clone()),
+                commit_ts_micros: now_micros(),
                 create_revision: v.create_revision,
                 mod_revision: revision,
                 version: v.version,
@@ -505,6 +510,14 @@ impl KvStore {
 
     pub fn subscribe_watch(&self, filter: WatchFilter) -> WatchSubscription {
         self.watch_ring.subscribe(&filter)
+    }
+
+    pub fn watch_backlog(&self, filter: &WatchFilter) -> Vec<Arc<WatchEvent>> {
+        self.watch_ring.backlog(filter)
+    }
+
+    pub fn subscribe_watch_live(&self, filter: &WatchFilter) -> WatchReceiver {
+        self.watch_ring.subscribe_live(filter)
     }
 
     pub fn lease_grant(&self, id: i64, ttl: i64) -> Result<LeaseGrantOutput, StoreError> {
@@ -640,6 +653,7 @@ impl KvStore {
                 key: k.clone(),
                 value: Arc::<[u8]>::from(Vec::<u8>::new()),
                 prev_value: Arc::<[u8]>::from(v.value.clone()),
+                commit_ts_micros: now_micros(),
                 create_revision: v.create_revision,
                 mod_revision: revision,
                 version: v.version,
@@ -721,6 +735,13 @@ fn prefix_end(prefix: &[u8]) -> Vec<u8> {
         }
     }
     vec![0]
+}
+
+fn now_micros() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

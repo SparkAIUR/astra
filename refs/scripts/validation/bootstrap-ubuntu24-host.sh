@@ -302,6 +302,7 @@ EOF
 
 install_tooling() {
   install_apt_packages_if_missing \
+    awscli \
     bash-completion \
     ca-certificates \
     coreutils \

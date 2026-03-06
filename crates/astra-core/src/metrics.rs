@@ -101,6 +101,13 @@ struct AstraMetrics {
     put_queue_wait_normal_ms: Histogram,
     put_raft_write_ms: Histogram,
     put_quorum_ack_ms: Histogram,
+    raft_append_rpc_client_ms: Histogram,
+    raft_append_rpc_server_ms: Histogram,
+    raft_install_snapshot_rpc_client_ms: Histogram,
+    raft_install_snapshot_rpc_server_ms: Histogram,
+    raft_snapshot_build_ms: Histogram,
+    raft_snapshot_install_deserialize_ms: Histogram,
+    raft_snapshot_install_load_ms: Histogram,
     put_batch_size: Histogram,
     bg_io_throttle_wait_ms: Histogram,
     put_batches_total: AtomicU64,
@@ -116,6 +123,11 @@ struct AstraMetrics {
     wal_effective_linger_us: AtomicU64,
     wal_queue_depth: AtomicU64,
     wal_queue_bytes: AtomicU64,
+    wal_logical_bytes: AtomicU64,
+    wal_allocated_bytes: AtomicU64,
+    wal_checkpoint_ms: Histogram,
+    wal_checkpoint_total: AtomicU64,
+    wal_checkpoint_reclaimed_bytes_total: AtomicU64,
     lsm_synth_l0_files: AtomicU64,
     write_stall_delay_ms: Histogram,
     write_stall_events_total: AtomicU64,
@@ -134,6 +146,12 @@ struct AstraMetrics {
     list_revision_filter_hits_total: AtomicU64,
     list_prefetch_hits_total: AtomicU64,
     list_prefetch_misses_total: AtomicU64,
+    list_stream_chunks_total: AtomicU64,
+    list_stream_bytes_total: AtomicU64,
+    list_stream_hydrated_values_total: AtomicU64,
+    list_stream_hydrated_bytes_total: AtomicU64,
+    semantic_cache_hits_total: AtomicU64,
+    semantic_cache_misses_total: AtomicU64,
     read_isolation_dispatch_total: AtomicU64,
     read_isolation_failures_total: AtomicU64,
     read_quorum_checks_total: AtomicU64,
@@ -155,6 +173,24 @@ struct AstraMetrics {
     request_lease_total: AtomicU64,
     request_watch_total: AtomicU64,
     request_tier0_total: AtomicU64,
+    watch_delegate_reject_total: AtomicU64,
+    watch_delegate_accept_total: AtomicU64,
+    watch_active_streams: AtomicU64,
+    watch_lagged_total: AtomicU64,
+    watch_lagged_skipped_events_total: AtomicU64,
+    watch_resync_total: AtomicU64,
+    watch_resync_keys_total: AtomicU64,
+    watch_emit_lag_ms: Histogram,
+    watch_dispatch_queue_depth: AtomicU64,
+    watch_slow_cancels_total: AtomicU64,
+    watch_emit_batch_size: Histogram,
+    raft_append_rpc_failures_total: AtomicU64,
+    raft_install_snapshot_rpc_failures_total: AtomicU64,
+    large_value_upload_ms: Histogram,
+    large_value_upload_failures_total: AtomicU64,
+    large_value_hydrate_ms: Histogram,
+    large_value_hydrate_cache_hits_total: AtomicU64,
+    large_value_hydrate_cache_misses_total: AtomicU64,
     profile_switch_total: AtomicU64,
     profile_active_kubernetes: AtomicU64,
     profile_active_omni: AtomicU64,
@@ -190,6 +226,34 @@ impl AstraMetrics {
                 QUORUM_ACK_BUCKETS_MS,
                 HistogramMode::SecondsFromMillis,
             ),
+            raft_append_rpc_client_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            raft_append_rpc_server_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            raft_install_snapshot_rpc_client_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            raft_install_snapshot_rpc_server_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            raft_snapshot_build_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            raft_snapshot_install_deserialize_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            raft_snapshot_install_load_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
             put_batch_size: Histogram::new(BATCH_SIZE_BUCKETS, HistogramMode::Raw),
             bg_io_throttle_wait_ms: Histogram::new(
                 BG_IO_WAIT_BUCKETS_MS,
@@ -208,6 +272,14 @@ impl AstraMetrics {
             wal_effective_linger_us: AtomicU64::new(0),
             wal_queue_depth: AtomicU64::new(0),
             wal_queue_bytes: AtomicU64::new(0),
+            wal_logical_bytes: AtomicU64::new(0),
+            wal_allocated_bytes: AtomicU64::new(0),
+            wal_checkpoint_ms: Histogram::new(
+                BG_IO_WAIT_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            wal_checkpoint_total: AtomicU64::new(0),
+            wal_checkpoint_reclaimed_bytes_total: AtomicU64::new(0),
             lsm_synth_l0_files: AtomicU64::new(0),
             write_stall_delay_ms: Histogram::new(
                 WRITE_STALL_BUCKETS_MS,
@@ -232,6 +304,12 @@ impl AstraMetrics {
             list_revision_filter_hits_total: AtomicU64::new(0),
             list_prefetch_hits_total: AtomicU64::new(0),
             list_prefetch_misses_total: AtomicU64::new(0),
+            list_stream_chunks_total: AtomicU64::new(0),
+            list_stream_bytes_total: AtomicU64::new(0),
+            list_stream_hydrated_values_total: AtomicU64::new(0),
+            list_stream_hydrated_bytes_total: AtomicU64::new(0),
+            semantic_cache_hits_total: AtomicU64::new(0),
+            semantic_cache_misses_total: AtomicU64::new(0),
             read_isolation_dispatch_total: AtomicU64::new(0),
             read_isolation_failures_total: AtomicU64::new(0),
             read_quorum_checks_total: AtomicU64::new(0),
@@ -253,6 +331,33 @@ impl AstraMetrics {
             request_lease_total: AtomicU64::new(0),
             request_watch_total: AtomicU64::new(0),
             request_tier0_total: AtomicU64::new(0),
+            watch_delegate_reject_total: AtomicU64::new(0),
+            watch_delegate_accept_total: AtomicU64::new(0),
+            watch_active_streams: AtomicU64::new(0),
+            watch_lagged_total: AtomicU64::new(0),
+            watch_lagged_skipped_events_total: AtomicU64::new(0),
+            watch_resync_total: AtomicU64::new(0),
+            watch_resync_keys_total: AtomicU64::new(0),
+            watch_emit_lag_ms: Histogram::new(
+                QUEUE_WAIT_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            watch_dispatch_queue_depth: AtomicU64::new(0),
+            watch_slow_cancels_total: AtomicU64::new(0),
+            watch_emit_batch_size: Histogram::new(BATCH_SIZE_BUCKETS, HistogramMode::Raw),
+            raft_append_rpc_failures_total: AtomicU64::new(0),
+            raft_install_snapshot_rpc_failures_total: AtomicU64::new(0),
+            large_value_upload_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            large_value_upload_failures_total: AtomicU64::new(0),
+            large_value_hydrate_ms: Histogram::new(
+                CLIENT_WRITE_BUCKETS_MS,
+                HistogramMode::SecondsFromMillis,
+            ),
+            large_value_hydrate_cache_hits_total: AtomicU64::new(0),
+            large_value_hydrate_cache_misses_total: AtomicU64::new(0),
             profile_switch_total: AtomicU64::new(0),
             profile_active_kubernetes: AtomicU64::new(0),
             profile_active_omni: AtomicU64::new(0),
@@ -372,6 +477,80 @@ pub fn observe_put_quorum_ack_ms(value_ms: u64) {
     reg.quorum_ack_observations.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn observe_raft_append_rpc_client_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_append_rpc_client_ms.observe(value_ms);
+}
+
+pub fn observe_raft_append_rpc_server_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_append_rpc_server_ms.observe(value_ms);
+}
+
+pub fn inc_raft_append_rpc_failures_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_append_rpc_failures_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn observe_raft_install_snapshot_rpc_client_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_install_snapshot_rpc_client_ms.observe(value_ms);
+}
+
+pub fn observe_raft_install_snapshot_rpc_server_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_install_snapshot_rpc_server_ms.observe(value_ms);
+}
+
+pub fn inc_raft_install_snapshot_rpc_failures_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_install_snapshot_rpc_failures_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn observe_raft_snapshot_build_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_snapshot_build_ms.observe(value_ms);
+}
+
+pub fn observe_raft_snapshot_install_deserialize_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_snapshot_install_deserialize_ms.observe(value_ms);
+}
+
+pub fn observe_raft_snapshot_install_load_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.raft_snapshot_install_load_ms.observe(value_ms);
+}
+
 pub fn observe_put_batch_size(size: usize) {
     let reg = metrics();
     if !reg.enabled() {
@@ -473,6 +652,47 @@ pub fn set_wal_queue_depth(depth: usize) {
 pub fn set_wal_queue_bytes(bytes: usize) {
     let reg = metrics();
     reg.wal_queue_bytes.store(bytes as u64, Ordering::Relaxed);
+}
+
+pub fn set_wal_logical_bytes(bytes: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.wal_logical_bytes.store(bytes, Ordering::Relaxed);
+}
+
+pub fn set_wal_allocated_bytes(bytes: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.wal_allocated_bytes.store(bytes, Ordering::Relaxed);
+}
+
+pub fn observe_wal_checkpoint_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.wal_checkpoint_ms.observe(value_ms);
+}
+
+pub fn inc_wal_checkpoint_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.wal_checkpoint_total.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn add_wal_checkpoint_reclaimed_bytes(bytes: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.wal_checkpoint_reclaimed_bytes_total
+        .fetch_add(bytes, Ordering::Relaxed);
 }
 
 pub fn current_wal_queue_depth() -> u64 {
@@ -806,6 +1026,189 @@ pub fn inc_request_tier0_total() {
     reg.request_tier0_total.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn inc_watch_delegate_reject_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_delegate_reject_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn inc_watch_delegate_accept_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_delegate_accept_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn inc_watch_active_streams() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_active_streams.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn dec_watch_active_streams() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_active_streams.fetch_sub(1, Ordering::Relaxed);
+}
+
+pub fn inc_watch_lagged_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_lagged_total.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn add_watch_lagged_skipped_events(skipped: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_lagged_skipped_events_total
+        .fetch_add(skipped, Ordering::Relaxed);
+}
+
+pub fn inc_watch_resync_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_resync_total.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn add_watch_resync_keys(count: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_resync_keys_total
+        .fetch_add(count, Ordering::Relaxed);
+}
+
+pub fn observe_watch_emit_lag_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_emit_lag_ms.observe(value_ms);
+}
+
+pub fn set_watch_dispatch_queue_depth(count: usize) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_dispatch_queue_depth
+        .store(count as u64, Ordering::Relaxed);
+}
+
+pub fn inc_watch_slow_cancels_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_slow_cancels_total.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn observe_watch_emit_batch_size(size: usize) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.watch_emit_batch_size.observe(size as u64);
+}
+
+pub fn observe_large_value_upload_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.large_value_upload_ms.observe(value_ms);
+}
+
+pub fn inc_large_value_upload_failures_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.large_value_upload_failures_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn observe_large_value_hydrate_ms(value_ms: u64) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.large_value_hydrate_ms.observe(value_ms);
+}
+
+pub fn inc_large_value_hydrate_cache_hits_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.large_value_hydrate_cache_hits_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn inc_large_value_hydrate_cache_misses_total() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.large_value_hydrate_cache_misses_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn inc_semantic_cache_hits() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.semantic_cache_hits_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn inc_semantic_cache_misses() {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.semantic_cache_misses_total
+        .fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn add_list_stream_chunk(bytes: usize) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.list_stream_chunks_total.fetch_add(1, Ordering::Relaxed);
+    reg.list_stream_bytes_total
+        .fetch_add(bytes as u64, Ordering::Relaxed);
+}
+
+pub fn add_list_stream_hydrated(values: usize, bytes: usize) {
+    let reg = metrics();
+    if !reg.enabled() {
+        return;
+    }
+    reg.list_stream_hydrated_values_total
+        .fetch_add(values as u64, Ordering::Relaxed);
+    reg.list_stream_hydrated_bytes_total
+        .fetch_add(bytes as u64, Ordering::Relaxed);
+}
+
 pub fn inc_profile_switch_total() {
     let reg = metrics();
     if !reg.enabled() {
@@ -912,6 +1315,41 @@ pub fn render_prometheus() -> String {
         "astra_put_quorum_ack_seconds",
         "Time from batch submit to commit advancement signal.",
     );
+    reg.raft_append_rpc_client_ms.render(
+        &mut out,
+        "astra_raft_append_rpc_client_seconds",
+        "Leader-side append_entries RPC duration.",
+    );
+    reg.raft_append_rpc_server_ms.render(
+        &mut out,
+        "astra_raft_append_rpc_server_seconds",
+        "Follower-side append_entries handler duration.",
+    );
+    reg.raft_install_snapshot_rpc_client_ms.render(
+        &mut out,
+        "astra_raft_install_snapshot_rpc_client_seconds",
+        "Leader-side install_snapshot RPC duration.",
+    );
+    reg.raft_install_snapshot_rpc_server_ms.render(
+        &mut out,
+        "astra_raft_install_snapshot_rpc_server_seconds",
+        "Follower-side install_snapshot handler duration.",
+    );
+    reg.raft_snapshot_build_ms.render(
+        &mut out,
+        "astra_raft_snapshot_build_seconds",
+        "Duration of raft snapshot materialization.",
+    );
+    reg.raft_snapshot_install_deserialize_ms.render(
+        &mut out,
+        "astra_raft_snapshot_install_deserialize_seconds",
+        "Duration of follower snapshot payload deserialization.",
+    );
+    reg.raft_snapshot_install_load_ms.render(
+        &mut out,
+        "astra_raft_snapshot_install_load_seconds",
+        "Duration of follower snapshot state load into the KV store.",
+    );
     reg.put_batch_size.render(
         &mut out,
         "astra_put_batch_size",
@@ -931,6 +1369,31 @@ pub fn render_prometheus() -> String {
         &mut out,
         "astra_write_stall_delay_seconds",
         "Write stall delay injected by L0 pressure controller.",
+    );
+    reg.watch_emit_lag_ms.render(
+        &mut out,
+        "astra_watch_emit_lag_seconds",
+        "Delay between commit timestamp and watch event emission.",
+    );
+    reg.watch_emit_batch_size.render(
+        &mut out,
+        "astra_watch_emit_batch_size",
+        "Number of watch events emitted per streamed watch response.",
+    );
+    reg.large_value_upload_ms.render(
+        &mut out,
+        "astra_large_value_upload_seconds",
+        "Duration of large-value tier upload operations.",
+    );
+    reg.large_value_hydrate_ms.render(
+        &mut out,
+        "astra_large_value_hydrate_seconds",
+        "Duration of large-value hydrate read operations from object tier.",
+    );
+    reg.wal_checkpoint_ms.render(
+        &mut out,
+        "astra_wal_checkpoint_seconds",
+        "Duration of WAL checkpoint compaction rewrites.",
     );
 
     let _ = writeln!(
@@ -1054,6 +1517,50 @@ pub fn render_prometheus() -> String {
         &mut out,
         "astra_wal_queue_bytes {}",
         reg.wal_queue_bytes.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_wal_logical_bytes Current durable WAL bytes containing replayable records."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_wal_logical_bytes gauge");
+    let _ = writeln!(
+        &mut out,
+        "astra_wal_logical_bytes {}",
+        reg.wal_logical_bytes.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_wal_allocated_bytes Current allocated WAL file bytes on disk."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_wal_allocated_bytes gauge");
+    let _ = writeln!(
+        &mut out,
+        "astra_wal_allocated_bytes {}",
+        reg.wal_allocated_bytes.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_wal_checkpoint_total Total WAL checkpoint compaction rewrites."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_wal_checkpoint_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_wal_checkpoint_total {}",
+        reg.wal_checkpoint_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_wal_checkpoint_reclaimed_bytes_total Total physical WAL bytes reclaimed by checkpoint compaction."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_wal_checkpoint_reclaimed_bytes_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_wal_checkpoint_reclaimed_bytes_total {}",
+        reg.wal_checkpoint_reclaimed_bytes_total
+            .load(Ordering::Relaxed)
     );
 
     let _ = writeln!(
@@ -1255,6 +1762,73 @@ pub fn render_prometheus() -> String {
         &mut out,
         "astra_list_prefetch_misses_total {}",
         reg.list_prefetch_misses_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_list_stream_chunks_total Total streamed LIST chunks emitted via admin StreamList."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_list_stream_chunks_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_list_stream_chunks_total {}",
+        reg.list_stream_chunks_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_list_stream_bytes_total Total bytes emitted via admin StreamList chunks."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_list_stream_bytes_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_list_stream_bytes_total {}",
+        reg.list_stream_bytes_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_list_stream_hydrated_values_total Total tiered values hydrated while emitting admin StreamList chunks."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_list_stream_hydrated_values_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_list_stream_hydrated_values_total {}",
+        reg.list_stream_hydrated_values_total
+            .load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_list_stream_hydrated_bytes_total Total hydrated payload bytes emitted via admin StreamList."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_list_stream_hydrated_bytes_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_list_stream_hydrated_bytes_total {}",
+        reg.list_stream_hydrated_bytes_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_semantic_cache_hits_total Total semantic hot-cache hits."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_semantic_cache_hits_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_semantic_cache_hits_total {}",
+        reg.semantic_cache_hits_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_semantic_cache_misses_total Total semantic hot-cache misses."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_semantic_cache_misses_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_semantic_cache_misses_total {}",
+        reg.semantic_cache_misses_total.load(Ordering::Relaxed)
     );
 
     let _ = writeln!(
@@ -1503,6 +2077,169 @@ pub fn render_prometheus() -> String {
         &mut out,
         "astra_request_tier0_total {}",
         reg.request_tier0_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_delegate_reject_total Total watch requests rejected by watch role policy."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_delegate_reject_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_delegate_reject_total {}",
+        reg.watch_delegate_reject_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_delegate_accept_total Total watch requests accepted on non-leader nodes by delegation policy."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_delegate_accept_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_delegate_accept_total {}",
+        reg.watch_delegate_accept_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_active_streams Current number of active watch streams."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_active_streams gauge");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_active_streams {}",
+        reg.watch_active_streams.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_lagged_total Total watch lag events observed from the broadcast ring."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_lagged_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_lagged_total {}",
+        reg.watch_lagged_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_lagged_skipped_events_total Total watch events skipped by lagged watch receivers."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_watch_lagged_skipped_events_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_lagged_skipped_events_total {}",
+        reg.watch_lagged_skipped_events_total
+            .load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_resync_total Total watch lag-compression resync attempts."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_resync_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_resync_total {}",
+        reg.watch_resync_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_resync_keys_total Total keys emitted via watch lag-compression resync."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_resync_keys_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_resync_keys_total {}",
+        reg.watch_resync_keys_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_dispatch_queue_depth Current watch stream response queue depth estimate."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_dispatch_queue_depth gauge");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_dispatch_queue_depth {}",
+        reg.watch_dispatch_queue_depth.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_watch_slow_cancels_total Total watch streams canceled due to slow consumer backpressure."
+    );
+    let _ = writeln!(&mut out, "# TYPE astra_watch_slow_cancels_total counter");
+    let _ = writeln!(
+        &mut out,
+        "astra_watch_slow_cancels_total {}",
+        reg.watch_slow_cancels_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_raft_append_rpc_failures_total Total failed append_entries RPC attempts."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_raft_append_rpc_failures_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_raft_append_rpc_failures_total {}",
+        reg.raft_append_rpc_failures_total.load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_raft_install_snapshot_rpc_failures_total Total failed install_snapshot RPC attempts."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_raft_install_snapshot_rpc_failures_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_raft_install_snapshot_rpc_failures_total {}",
+        reg.raft_install_snapshot_rpc_failures_total
+            .load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_large_value_upload_failures_total Total failed large-value tier upload attempts."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_large_value_upload_failures_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_large_value_upload_failures_total {}",
+        reg.large_value_upload_failures_total
+            .load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_large_value_hydrate_cache_hits_total Total hydrate cache hits for large-value tier references."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_large_value_hydrate_cache_hits_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_large_value_hydrate_cache_hits_total {}",
+        reg.large_value_hydrate_cache_hits_total
+            .load(Ordering::Relaxed)
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP astra_large_value_hydrate_cache_misses_total Total hydrate cache misses for large-value tier references."
+    );
+    let _ = writeln!(
+        &mut out,
+        "# TYPE astra_large_value_hydrate_cache_misses_total counter"
+    );
+    let _ = writeln!(
+        &mut out,
+        "astra_large_value_hydrate_cache_misses_total {}",
+        reg.large_value_hydrate_cache_misses_total
+            .load(Ordering::Relaxed)
     );
 
     let _ = writeln!(

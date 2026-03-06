@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/phase2-common.sh"
 ensure_tools
 
 if [ -z "${ASTRA_IMAGE:-}" ]; then
-  echo "ASTRA_IMAGE is required, e.g. halceon/astra:<tag>" >&2
+  echo "ASTRA_IMAGE is required, e.g. halceon/astra-alpha:<tag>" >&2
   exit 1
 fi
 
