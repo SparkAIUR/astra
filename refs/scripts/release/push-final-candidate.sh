@@ -12,18 +12,31 @@ if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
   exit 1
 fi
 
+IS_PRERELEASE=false
+if [[ "$TAG" == *-rc* ]]; then
+  IS_PRERELEASE=true
+fi
+
 TAGS=(
   "-t" "docker.io/halceon/astra:${TAG}"
-  "-t" "docker.io/halceon/astra:latest"
   "-t" "docker.io/nudevco/astra:${TAG}"
-  "-t" "docker.io/nudevco/astra:latest"
 )
 
 echo "Pushing multi-arch image tags for ${TAG}:"
 echo "  - docker.io/halceon/astra:${TAG}"
-echo "  - docker.io/halceon/astra:latest"
 echo "  - docker.io/nudevco/astra:${TAG}"
-echo "  - docker.io/nudevco/astra:latest"
+
+if [[ "${IS_PRERELEASE}" != "true" ]]; then
+  TAGS+=(
+    "-t" "docker.io/halceon/astra:latest"
+    "-t" "docker.io/nudevco/astra:latest"
+  )
+  echo "  - docker.io/halceon/astra:latest"
+  echo "  - docker.io/nudevco/astra:latest"
+else
+  echo "  - latest tags skipped for prerelease ${TAG}"
+fi
+
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
   "${TAGS[@]}" \

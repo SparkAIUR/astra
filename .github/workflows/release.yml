@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   verify:
@@ -38,8 +39,6 @@ jobs:
   publish-crates:
     needs: verify
     runs-on: ubuntu-latest
-    env:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -64,6 +63,33 @@ jobs:
         id: tag
         run: echo "value=${GITHUB_REF_NAME}" >> "${GITHUB_OUTPUT}"
 
+      - name: Compute image tag sets
+        id: image-tags
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          stable=true
+          if [[ "$tag" == *-rc* ]]; then
+            stable=false
+          fi
+          {
+            echo "astra<<EOF"
+            echo "docker.io/halceon/astra:${tag}"
+            echo "docker.io/nudevco/astra:${tag}"
+            if [[ "${stable}" == "true" ]]; then
+              echo "docker.io/halceon/astra:latest"
+              echo "docker.io/nudevco/astra:latest"
+            fi
+            echo "EOF"
+            echo "forge<<EOF"
+            echo "docker.io/halceon/astra-forge:${tag}"
+            if [[ "${stable}" == "true" ]]; then
+              echo "docker.io/halceon/astra-forge:latest"
+            fi
+            echo "EOF"
+            echo "stable=${stable}"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -83,11 +109,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           provenance: false
-          tags: |
-            docker.io/halceon/astra:${{ steps.tag.outputs.value }}
-            docker.io/halceon/astra:latest
-            docker.io/nudevco/astra:${{ steps.tag.outputs.value }}
-            docker.io/nudevco/astra:latest
+          tags: ${{ steps.image-tags.outputs.astra }}
 
       - name: Build and push forge helper image
         uses: docker/build-push-action@v6
@@ -97,9 +119,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           provenance: false
-          tags: |
-            docker.io/halceon/astra-forge:${{ steps.tag.outputs.value }}
-            docker.io/halceon/astra-forge:latest
+          tags: ${{ steps.image-tags.outputs.forge }}
 
   publish-release:
     needs: publish-images
@@ -114,13 +134,22 @@ jobs:
           - Crates.io crates: `astra-proto`, `astra-core`, `astractl`, `astrad`, `astra-forge`
           - Multi-arch images:
             - `docker.io/halceon/astra:${{ github.ref_name }}`
-            - `docker.io/halceon/astra:latest`
             - `docker.io/nudevco/astra:${{ github.ref_name }}`
-            - `docker.io/nudevco/astra:latest`
             - `docker.io/halceon/astra-forge:${{ github.ref_name }}`
-            - `docker.io/halceon/astra-forge:latest`
           - Public docs and benchmark reports
           NOTES
+          if [[ "${GITHUB_REF_NAME}" != *-rc* ]]; then
+            cat >> /tmp/release-preface.md <<'NOTES'
+          - Stable aliases updated:
+            - `docker.io/halceon/astra:latest`
+            - `docker.io/nudevco/astra:latest`
+            - `docker.io/halceon/astra-forge:latest`
+          NOTES
+          else
+            cat >> /tmp/release-preface.md <<'NOTES'
+          - Stable aliases were not updated because this tag is a prerelease.
+          NOTES
+          fi
 
       - name: Create or update GitHub release
         env:

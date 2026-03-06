@@ -13,20 +13,35 @@ if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
 fi
 
 IMAGE_HALCEON="docker.io/halceon/astra:${TAG}"
-IMAGE_HALCEON_LATEST="docker.io/halceon/astra:latest"
 IMAGE_NUDEVCO="docker.io/nudevco/astra:${TAG}"
-IMAGE_NUDEVCO_LATEST="docker.io/nudevco/astra:latest"
+IS_PRERELEASE=false
+if [[ "$TAG" == *-rc* ]]; then
+  IS_PRERELEASE=true
+fi
 
 echo "Building local image tags:"
 echo "  - ${IMAGE_HALCEON}"
-echo "  - ${IMAGE_HALCEON_LATEST}"
 echo "  - ${IMAGE_NUDEVCO}"
-echo "  - ${IMAGE_NUDEVCO_LATEST}"
+BUILD_ARGS=(
+  -t "${IMAGE_HALCEON}"
+  -t "${IMAGE_NUDEVCO}"
+)
+
+if [[ "${IS_PRERELEASE}" != "true" ]]; then
+  IMAGE_HALCEON_LATEST="docker.io/halceon/astra:latest"
+  IMAGE_NUDEVCO_LATEST="docker.io/nudevco/astra:latest"
+  echo "  - ${IMAGE_HALCEON_LATEST}"
+  echo "  - ${IMAGE_NUDEVCO_LATEST}"
+  BUILD_ARGS+=(
+    -t "${IMAGE_HALCEON_LATEST}"
+    -t "${IMAGE_NUDEVCO_LATEST}"
+  )
+else
+  echo "  - latest tags skipped for prerelease ${TAG}"
+fi
+
 docker buildx build \
-  -t "${IMAGE_HALCEON}" \
-  -t "${IMAGE_HALCEON_LATEST}" \
-  -t "${IMAGE_NUDEVCO}" \
-  -t "${IMAGE_NUDEVCO_LATEST}" \
+  "${BUILD_ARGS[@]}" \
   --load \
   .
 

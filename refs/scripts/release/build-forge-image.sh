@@ -13,15 +13,28 @@ if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
 fi
 
 IMAGE_TAGGED="docker.io/halceon/astra-forge:${TAG}"
-IMAGE_LATEST="docker.io/halceon/astra-forge:latest"
+IS_PRERELEASE=false
+if [[ "$TAG" == *-rc* ]]; then
+  IS_PRERELEASE=true
+fi
 
 echo "Building local forge image tags:"
 echo "  - ${IMAGE_TAGGED}"
-echo "  - ${IMAGE_LATEST}"
+BUILD_ARGS=(
+  -f Dockerfile.forge
+  -t "${IMAGE_TAGGED}"
+)
+
+if [[ "${IS_PRERELEASE}" != "true" ]]; then
+  IMAGE_LATEST="docker.io/halceon/astra-forge:latest"
+  echo "  - ${IMAGE_LATEST}"
+  BUILD_ARGS+=(-t "${IMAGE_LATEST}")
+else
+  echo "  - latest forge tag skipped for prerelease ${TAG}"
+fi
+
 docker buildx build \
-  -f Dockerfile.forge \
-  -t "${IMAGE_TAGGED}" \
-  -t "${IMAGE_LATEST}" \
+  "${BUILD_ARGS[@]}" \
   --load \
   .
 
