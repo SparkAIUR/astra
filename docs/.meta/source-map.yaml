@@ -1,8 +1,19 @@
-generated_at: '2026-03-04T16:48:41Z'
+generated_at: '2026-03-06T03:31:44Z'
 docs_root: docs
 entries:
 - page: /architecture
   file: docs/architecture.md
+  title: Architecture (Legacy Entry)
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src
+  - crates/astrad/src/main.rs
+  related_artifacts:
+  - docs/internals/architecture-overview.md
+  - docs/internals/write-path.md
+- page: /architecture
+  file: docs/architecture.mdx
   title: Architecture (Legacy Entry)
   status: canonical
   last_verified: 2026-03-03
@@ -21,8 +32,26 @@ entries:
   - crates/astra-core/src/raft.rs
   - crates/astra-core/src/store.rs
   related_artifacts: []
+- page: /concepts/consistency-model
+  file: docs/concepts/consistency-model.mdx
+  title: Consistency Model
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/raft.rs
+  - crates/astra-core/src/store.rs
+  related_artifacts: []
 - page: /concepts/control-plane-compatibility
   file: docs/concepts/control-plane-compatibility.md
+  title: Control-Plane Compatibility
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-proto/proto/rpc.proto
+  - crates/astrad/src/main.rs
+  related_artifacts: []
+- page: /concepts/control-plane-compatibility
+  file: docs/concepts/control-plane-compatibility.mdx
   title: Control-Plane Compatibility
   status: canonical
   last_verified: 2026-03-03
@@ -40,6 +69,16 @@ entries:
   - crates/astra-forge/src/main.rs
   related_artifacts:
   - refs/scripts/validation/phase11-scenario-fleet-cutover.sh
+- page: /concepts/tenant-virtualization
+  file: docs/concepts/tenant-virtualization.mdx
+  title: Tenant Virtualization
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - crates/astra-forge/src/main.rs
+  related_artifacts:
+  - refs/scripts/validation/phase11-scenario-fleet-cutover.sh
 - page: /contribute/adr-index
   file: docs/contribute/adr-index.md
   title: ADR Index
@@ -48,8 +87,25 @@ entries:
   source_of_truth:
   - README.md
   related_artifacts: []
+- page: /contribute/adr-index
+  file: docs/contribute/adr-index.mdx
+  title: ADR Index
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - README.md
+  related_artifacts: []
 - page: /contribute/contributing
   file: docs/contribute/contributing.md
+  title: Contributing
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - README.md
+  related_artifacts:
+  - docs/contribute/docs-style-guide.md
+- page: /contribute/contributing
+  file: docs/contribute/contributing.mdx
   title: Contributing
   status: canonical
   last_verified: 2026-03-03
@@ -67,6 +123,16 @@ entries:
   related_artifacts:
   - refs/scripts/docs/sync_source_map.py
   - refs/scripts/docs/validate_docs.py
+- page: /contribute/docs-source-of-truth
+  file: docs/contribute/docs-source-of-truth.mdx
+  title: Docs Sources of Truth
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - docs/.meta/source-map.yaml
+  related_artifacts:
+  - refs/scripts/docs/sync_source_map.py
+  - refs/scripts/docs/validate_docs.py
 - page: /contribute/docs-style-guide
   file: docs/contribute/docs-style-guide.md
   title: Docs Style Guide
@@ -76,6 +142,27 @@ entries:
   - docs/.meta/source-map.yaml
   related_artifacts:
   - refs/scripts/docs/validate_docs.py
+- page: /contribute/docs-style-guide
+  file: docs/contribute/docs-style-guide.mdx
+  title: Docs Style Guide
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - docs/.meta/source-map.yaml
+  related_artifacts:
+  - refs/scripts/docs/validate_docs.py
+- page: /deployment
+  file: docs/deployment.mdx
+  title: Deployment Overview
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - docker-compose.yml
+  related_artifacts:
+  - /guides/deploy-k3s-single-node
+  - /guides/deploy-k3s-cluster
+  - /guides/deploy-omni-with-astra
 - page: /disaster-recovery
   file: docs/disaster-recovery.md
   title: Disaster Recovery (Legacy Entry)
@@ -85,6 +172,72 @@ entries:
   - docs/guides/disaster-recovery.md
   related_artifacts:
   - docs/guides/disaster-recovery.md
+- page: /disaster-recovery
+  file: docs/disaster-recovery.mdx
+  title: Disaster Recovery (Legacy Entry)
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - docs/guides/disaster-recovery.md
+  related_artifacts:
+  - docs/guides/disaster-recovery.md
+- page: /etcd-replacement
+  file: docs/etcd-replacement.mdx
+  title: Use Astra as an etcd Replacement
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astra-proto/proto/rpc.proto
+  - crates/astra-forge/src/main.rs
+  related_artifacts:
+  - /guides/migration-etcd-generic
+  - /guides/migration-k3s
+  - /guides/migration-omni
+- page: /getting-started
+  file: docs/getting-started.mdx
+  title: Getting Started
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - quickstart.sh
+  - docker-compose.yaml
+  related_artifacts:
+  - /reference/config/docker-compose-reference
+  - /operations/monitoring-prometheus-grafana
+- page: /guides/autotune-preview
+  file: docs/guides/autotune-preview.mdx
+  title: Autotune CLI Preview
+  status: draft
+  last_verified: 2026-03-05
+  source_of_truth:
+  - docs/operations/profiles-and-auto-governor.md
+  - refs/scripts/validation
+  related_artifacts:
+  - /operations/profiles-and-auto-governor
+  - /reference/config/env-vars
+- page: /guides/deploy-k3s-cluster
+  file: docs/guides/deploy-k3s-cluster.mdx
+  title: Deploy a K3s Cluster with Astra
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - refs/scripts/validation/phase6-k3s-benchmark.sh
+  related_artifacts:
+  - /guides/deploy-k3s-single-node
+  - /guides/migration-k3s
+- page: /guides/deploy-k3s-single-node
+  file: docs/guides/deploy-k3s-single-node.mdx
+  title: Deploy K3s on a Single Node with Astra
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - refs/scripts/deploy/deploy-k3s-single-node-remote.sh
+  - refs/scripts/deploy/docker-compose.k3s-single-node.production.yml
+  related_artifacts:
+  - /operations/deploy-production
+  - /operations/troubleshooting
 - page: /guides/deploy-k3s-with-astra
   file: docs/guides/deploy-k3s-with-astra.md
   title: Deploy Astra + K3s (Single Node and Cluster)
@@ -99,8 +252,43 @@ entries:
   related_artifacts:
   - docs/guides/migration-k3s.md
   - docs/operations/deploy-production.md
+- page: /guides/deploy-k3s-with-astra
+  file: docs/guides/deploy-k3s-with-astra.mdx
+  title: Deploy Astra + K3s (Single Node and Cluster)
+  status: canonical
+  last_verified: 2026-03-04
+  source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - refs/scripts/deploy/deploy-k3s-single-node-remote.sh
+  - refs/scripts/validation/docker-compose.image.yml
+  - refs/scripts/validation/docker-compose.k3s-single-node.yml
+  - refs/scripts/validation/k3s-single-node-readiness.sh
+  related_artifacts:
+  - docs/guides/migration-k3s.md
+  - docs/operations/deploy-production.md
+- page: /guides/deploy-omni-with-astra
+  file: docs/guides/deploy-omni-with-astra.mdx
+  title: Deploy Omni on Astra
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/sandbox/omni/README.md
+  - refs/sandbox/omni/keycloak/README.md
+  - crates/astractl/src/oidc_proxy.rs
+  related_artifacts:
+  - /guides/migration-omni
+  - /operations/auth-and-tenanting
 - page: /guides/disaster-recovery
   file: docs/guides/disaster-recovery.md
+  title: Disaster Recovery Guide
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/tiering.rs
+  - refs/scripts/validation/phase2-scenario-e.sh
+  related_artifacts: []
+- page: /guides/disaster-recovery
+  file: docs/guides/disaster-recovery.mdx
   title: Disaster Recovery Guide
   status: canonical
   last_verified: 2026-03-03
@@ -118,6 +306,16 @@ entries:
   - crates/astra-forge/src/main.rs
   related_artifacts:
   - refs/scripts/validation/phase2-scenario-b.sh
+- page: /guides/migration-etcd-generic
+  file: docs/guides/migration-etcd-generic.mdx
+  title: Generic etcd to Astra Migration
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-proto/proto/rpc.proto
+  - crates/astra-forge/src/main.rs
+  related_artifacts:
+  - refs/scripts/validation/phase2-scenario-b.sh
 - page: /guides/migration-k3s
   file: docs/guides/migration-k3s.md
   title: Migrate K3s Control Planes to Astra
@@ -127,8 +325,27 @@ entries:
   - refs/scripts/validation/phase6-k3s-benchmark.sh
   - refs/scripts/validation/phase9-run-all.sh
   related_artifacts: []
+- page: /guides/migration-k3s
+  file: docs/guides/migration-k3s.mdx
+  title: Migrate K3s Control Planes to Astra
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - refs/scripts/validation/phase6-k3s-benchmark.sh
+  - refs/scripts/validation/phase9-run-all.sh
+  related_artifacts: []
 - page: /guides/migration-omni
   file: docs/guides/migration-omni.md
+  title: Migrate Sidero Omni to Astra
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-forge/src/main.rs
+  - refs/scripts/validation/phase11-scenario-forge-ux.sh
+  - refs/scripts/validation/phase11-scenario-fleet-cutover.sh
+  related_artifacts: []
+- page: /guides/migration-omni
+  file: docs/guides/migration-omni.mdx
   title: Migrate Sidero Omni to Astra
   status: canonical
   last_verified: 2026-03-03
@@ -147,16 +364,41 @@ entries:
   - crates/astra-core/src/metrics.rs
   - crates/astrad/src/main.rs
   related_artifacts: []
-- page: /index
-  file: docs/index.md
-  title: The Book of Astra
+- page: /guides/performance-tuning
+  file: docs/guides/performance-tuning.mdx
+  title: Performance Tuning Guide
   status: canonical
   last_verified: 2026-03-03
   source_of_truth:
-  - README.md
+  - crates/astra-core/src/config.rs
+  - crates/astra-core/src/metrics.rs
+  - crates/astrad/src/main.rs
   related_artifacts: []
+- page: /index
+  file: docs/index.mdx
+  title: Astra
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - README.md
+  - crates/astrad/src/main.rs
+  related_artifacts:
+  - /getting-started
+  - /etcd-replacement
+  - /research/benchmark-results
 - page: /internals/architecture-overview
   file: docs/internals/architecture-overview.md
+  title: Architecture Overview
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - crates/astra-core/src/lib.rs
+  related_artifacts:
+  - docs/internals/write-path.md
+  - docs/internals/read-path.md
+- page: /internals/architecture-overview
+  file: docs/internals/architecture-overview.mdx
   title: Architecture Overview
   status: canonical
   last_verified: 2026-03-03
@@ -175,8 +417,26 @@ entries:
   - crates/astra-core/src/memory.rs
   - crates/astra-core/src/store.rs
   related_artifacts: []
+- page: /internals/memory-and-backpressure
+  file: docs/internals/memory-and-backpressure.mdx
+  title: Memory and Backpressure
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/memory.rs
+  - crates/astra-core/src/store.rs
+  related_artifacts: []
 - page: /internals/qos-and-lanes
   file: docs/internals/qos-and-lanes.md
+  title: QoS and Lanes
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/config.rs
+  - crates/astrad/src/main.rs
+  related_artifacts: []
+- page: /internals/qos-and-lanes
+  file: docs/internals/qos-and-lanes.mdx
   title: QoS and Lanes
   status: canonical
   last_verified: 2026-03-03
@@ -193,8 +453,27 @@ entries:
   - crates/astra-core/src/raft.rs
   - crates/astra-core/src/metrics.rs
   related_artifacts: []
+- page: /internals/raft-timeline
+  file: docs/internals/raft-timeline.mdx
+  title: Raft Timeline Telemetry
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/raft.rs
+  - crates/astra-core/src/metrics.rs
+  related_artifacts: []
 - page: /internals/read-path
   file: docs/internals/read-path.md
+  title: Read Path
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - crates/astra-core/src/store.rs
+  related_artifacts:
+  - docs/reference/api/etcd-kv-watch-lease.md
+- page: /internals/read-path
+  file: docs/internals/read-path.mdx
   title: Read Path
   status: canonical
   last_verified: 2026-03-03
@@ -213,8 +492,28 @@ entries:
   - refs/scripts/validation/phase10-run-all.sh
   - refs/scripts/validation/phase11-run-all.sh
   related_artifacts: []
+- page: /internals/testing-and-validation-harness
+  file: docs/internals/testing-and-validation-harness.mdx
+  title: Testing and Validation Harness
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - refs/scripts/validation/phase6-common.sh
+  - refs/scripts/validation/phase10-run-all.sh
+  - refs/scripts/validation/phase11-run-all.sh
+  related_artifacts: []
 - page: /internals/tiering-and-s3
   file: docs/internals/tiering-and-s3.md
+  title: Tiering and S3
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/tiering.rs
+  - crates/astrad/src/main.rs
+  related_artifacts:
+  - docs/guides/disaster-recovery.md
+- page: /internals/tiering-and-s3
+  file: docs/internals/tiering-and-s3.mdx
   title: Tiering and S3
   status: canonical
   last_verified: 2026-03-03
@@ -232,8 +531,27 @@ entries:
   - crates/astra-core/src/watch.rs
   related_artifacts:
   - refs/scripts/validation/phase5-scenario-watch-crucible.sh
+- page: /internals/watch-ring
+  file: docs/internals/watch-ring.mdx
+  title: Watch Ring
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/watch.rs
+  related_artifacts:
+  - refs/scripts/validation/phase5-scenario-watch-crucible.sh
 - page: /internals/write-path
   file: docs/internals/write-path.md
+  title: Write Path
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - crates/astra-core/src/raft.rs
+  related_artifacts:
+  - docs/internals/raft-timeline.md
+- page: /internals/write-path
+  file: docs/internals/write-path.mdx
   title: Write Path
   status: canonical
   last_verified: 2026-03-03
@@ -254,27 +572,76 @@ entries:
   - docs/guides/migration-omni.md
   - docs/guides/migration-k3s.md
   - docs/guides/migration-etcd-generic.md
+- page: /migration-handbook
+  file: docs/migration-handbook.mdx
+  title: Migration Handbook (Legacy Entry)
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-forge/src/main.rs
+  - refs/scripts/validation/phase11-scenario-fleet-cutover.sh
+  related_artifacts:
+  - docs/guides/migration-omni.md
+  - docs/guides/migration-k3s.md
+  - docs/guides/migration-etcd-generic.md
 - page: /operations/auth-and-tenanting
   file: docs/operations/auth-and-tenanting.md
   title: Auth and Tenanting
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
   - crates/astrad/src/main.rs
   - crates/astra-core/src/config.rs
+  - crates/astractl/src/oidc_proxy.rs
   related_artifacts:
-  - refs/scripts/validation/phase5-scenario-auth-tenant.sh
+  - /guides/deploy-omni-with-astra
+  - /reference/config/env-vars
+- page: /operations/auth-and-tenanting
+  file: docs/operations/auth-and-tenanting.mdx
+  title: Auth and Tenanting
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - crates/astra-core/src/config.rs
+  - crates/astractl/src/oidc_proxy.rs
+  related_artifacts:
+  - /guides/deploy-omni-with-astra
+  - /reference/config/env-vars
 - page: /operations/backup-and-restore
   file: docs/operations/backup-and-restore.md
   title: Backup and Restore
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
+  - refs/scripts/deploy/astra-archive-tier-backup.sh
   - crates/astra-core/src/tiering.rs
-  - refs/scripts/validation/phase2-scenario-e.sh
-  related_artifacts: []
+  related_artifacts:
+  - /operations/deploy-production
+  - /operations/troubleshooting
+- page: /operations/backup-and-restore
+  file: docs/operations/backup-and-restore.mdx
+  title: Backup and Restore
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/scripts/deploy/astra-archive-tier-backup.sh
+  - crates/astra-core/src/tiering.rs
+  related_artifacts:
+  - /operations/deploy-production
+  - /operations/troubleshooting
 - page: /operations/deploy-local-compose
   file: docs/operations/deploy-local-compose.md
+  title: Deploy Locally with Docker Compose
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - docker-compose.yaml
+  - quickstart.sh
+  related_artifacts:
+  - refs/sandbox/prometheus/prometheus.yml
+- page: /operations/deploy-local-compose
+  file: docs/operations/deploy-local-compose.mdx
   title: Deploy Locally with Docker Compose
   status: canonical
   last_verified: 2026-03-03
@@ -287,13 +654,36 @@ entries:
   file: docs/operations/deploy-production.md
   title: Deploy in Production
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
   - crates/astra-core/src/config.rs
   - docker-compose.yml
-  related_artifacts: []
+  related_artifacts:
+  - /guides/deploy-k3s-single-node
+  - /operations/backup-and-restore
+- page: /operations/deploy-production
+  file: docs/operations/deploy-production.mdx
+  title: Deploy in Production
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - crates/astra-core/src/config.rs
+  - docker-compose.yml
+  related_artifacts:
+  - /guides/deploy-k3s-single-node
+  - /operations/backup-and-restore
 - page: /operations/faq
   file: docs/operations/faq.md
+  title: FAQ
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - README.md
+  related_artifacts: []
+- page: /operations/faq
+  file: docs/operations/faq.mdx
   title: FAQ
   status: canonical
   last_verified: 2026-03-03
@@ -304,15 +694,37 @@ entries:
   file: docs/operations/monitoring-prometheus-grafana.md
   title: Monitoring with Prometheus and Grafana
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
   - refs/sandbox/prometheus/prometheus.yml
+  - refs/sandbox/prometheus/astra-single-node-alerts.yml
   - refs/sandbox/grafana/dashboards/astra-overview.json
   - crates/astra-core/src/metrics.rs
   related_artifacts:
-  - docker-compose.yaml
+  - /reference/metrics/metric-catalog
+- page: /operations/monitoring-prometheus-grafana
+  file: docs/operations/monitoring-prometheus-grafana.mdx
+  title: Monitoring with Prometheus and Grafana
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/sandbox/prometheus/prometheus.yml
+  - refs/sandbox/prometheus/astra-single-node-alerts.yml
+  - refs/sandbox/grafana/dashboards/astra-overview.json
+  - crates/astra-core/src/metrics.rs
+  related_artifacts:
+  - /reference/metrics/metric-catalog
 - page: /operations/profiles-and-auto-governor
   file: docs/operations/profiles-and-auto-governor.md
+  title: Profiles and Auto-Governor
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/config.rs
+  - crates/astrad/src/main.rs
+  related_artifacts: []
+- page: /operations/profiles-and-auto-governor
+  file: docs/operations/profiles-and-auto-governor.mdx
   title: Profiles and Auto-Governor
   status: canonical
   last_verified: 2026-03-03
@@ -324,11 +736,24 @@ entries:
   file: docs/operations/troubleshooting.md
   title: Troubleshooting
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
   - crates/astrad/src/main.rs
   - refs/scripts/validation
-  related_artifacts: []
+  related_artifacts:
+  - /operations/monitoring-prometheus-grafana
+  - /reference/metrics/metric-catalog
+- page: /operations/troubleshooting
+  file: docs/operations/troubleshooting.mdx
+  title: Troubleshooting
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - refs/scripts/validation
+  related_artifacts:
+  - /operations/monitoring-prometheus-grafana
+  - /reference/metrics/metric-catalog
 - page: /operations
   file: docs/operations.md
   title: Operations (Legacy Entry)
@@ -342,19 +767,30 @@ entries:
   - docs/operations/deploy-production.md
   - docs/operations/profiles-and-auto-governor.md
   - docs/operations/monitoring-prometheus-grafana.md
-- page: /quickstart
-  file: docs/quickstart.md
-  title: Quickstart
+- page: /operations
+  file: docs/operations.mdx
+  title: Operations (Legacy Entry)
   status: canonical
   last_verified: 2026-03-03
   source_of_truth:
-  - quickstart.sh
-  - docker-compose.yaml
+  - docker-compose.yml
+  - crates/astra-core/src/config.rs
+  - crates/astra-core/src/metrics.rs
   related_artifacts:
-  - refs/sandbox/prometheus/prometheus.yml
-  - refs/sandbox/grafana/dashboards/astra-overview.json
+  - docs/operations/deploy-production.md
+  - docs/operations/profiles-and-auto-governor.md
+  - docs/operations/monitoring-prometheus-grafana.md
 - page: /reference/api/astra-admin-bulkload
   file: docs/reference/api/astra-admin-bulkload.md
+  title: Astra Admin Bulkload API
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-proto/proto/admin.proto
+  related_artifacts:
+  - crates/astra-forge/src/main.rs
+- page: /reference/api/astra-admin-bulkload
+  file: docs/reference/api/astra-admin-bulkload.mdx
   title: Astra Admin Bulkload API
   status: canonical
   last_verified: 2026-03-03
@@ -371,8 +807,26 @@ entries:
   - crates/astra-proto/proto/rpc.proto
   related_artifacts:
   - docs/reference/api/internal-raft.md
+- page: /reference/api/etcd-kv-watch-lease
+  file: docs/reference/api/etcd-kv-watch-lease.mdx
+  title: etcd KV, Watch, and Lease API
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-proto/proto/rpc.proto
+  related_artifacts:
+  - docs/reference/api/internal-raft.md
 - page: /reference/api/internal-raft
   file: docs/reference/api/internal-raft.md
+  title: Internal Raft API
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-proto/proto/raft.proto
+  related_artifacts:
+  - crates/astra-core/src/raft.rs
+- page: /reference/api/internal-raft
+  file: docs/reference/api/internal-raft.mdx
   title: Internal Raft API
   status: canonical
   last_verified: 2026-03-03
@@ -390,18 +844,49 @@ entries:
   related_artifacts:
   - docs/guides/migration-omni.md
   - docs/reference/api/astra-admin-bulkload.md
+- page: /reference/cli/astra-forge
+  file: docs/reference/cli/astra-forge.mdx
+  title: astra-forge CLI
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-forge/src/main.rs
+  related_artifacts:
+  - docs/guides/migration-omni.md
+  - docs/reference/api/astra-admin-bulkload.md
 - page: /reference/cli/astractl
   file: docs/reference/cli/astractl.md
   title: astractl CLI
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
   - crates/astractl/src/main.rs
   related_artifacts:
-  - docs/reference/api/etcd-kv-watch-lease.md
-  - docs/reference/api/astra-admin-bulkload.md
+  - /reference/api/etcd-kv-watch-lease
+  - /reference/api/astra-admin-bulkload
+- page: /reference/cli/astractl
+  file: docs/reference/cli/astractl.mdx
+  title: astractl CLI
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astractl/src/main.rs
+  related_artifacts:
+  - /reference/api/etcd-kv-watch-lease
+  - /reference/api/astra-admin-bulkload
 - page: /reference/cli/astrad
   file: docs/reference/cli/astrad.md
+  title: astrad CLI
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astrad/src/main.rs
+  - crates/astra-core/src/config.rs
+  related_artifacts:
+  - docs/reference/config/env-vars.md
+  - docker-compose.yml
+- page: /reference/cli/astrad
+  file: docs/reference/cli/astrad.mdx
   title: astrad CLI
   status: canonical
   last_verified: 2026-03-03
@@ -415,13 +900,37 @@ entries:
   file: docs/reference/config/docker-compose-reference.md
   title: Docker Compose Reference
   status: canonical
-  last_verified: 2026-03-03
+  last_verified: 2026-03-05
   source_of_truth:
   - docker-compose.yml
+  - refs/scripts/deploy/docker-compose.k3s-single-node.production.yml
+  - refs/scripts/validation/docker-compose.image.yml
   related_artifacts:
-  - quickstart.sh
+  - /getting-started
+  - /guides/deploy-k3s-single-node
+- page: /reference/config/docker-compose-reference
+  file: docs/reference/config/docker-compose-reference.mdx
+  title: Docker Compose Reference
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - docker-compose.yml
+  - refs/scripts/deploy/docker-compose.k3s-single-node.production.yml
+  - refs/scripts/validation/docker-compose.image.yml
+  related_artifacts:
+  - /getting-started
+  - /guides/deploy-k3s-single-node
 - page: /reference/config/env-vars
   file: docs/reference/config/env-vars.md
+  title: Environment Variables
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/config.rs
+  related_artifacts:
+  - docker-compose.yml
+- page: /reference/config/env-vars
+  file: docs/reference/config/env-vars.mdx
   title: Environment Variables
   status: canonical
   last_verified: 2026-03-03
@@ -439,6 +948,16 @@ entries:
   related_artifacts:
   - docs/reference/metrics/slo-sli-reference.md
   - refs/sandbox/grafana/dashboards/astra-overview.json
+- page: /reference/metrics/metric-catalog
+  file: docs/reference/metrics/metric-catalog.mdx
+  title: Metric Catalog
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/metrics.rs
+  related_artifacts:
+  - docs/reference/metrics/slo-sli-reference.md
+  - refs/sandbox/grafana/dashboards/astra-overview.json
 - page: /reference/metrics/slo-sli-reference
   file: docs/reference/metrics/slo-sli-reference.md
   title: SLI and SLO Reference
@@ -448,3 +967,65 @@ entries:
   - crates/astra-core/src/metrics.rs
   related_artifacts:
   - docs/reference/metrics/metric-catalog.md
+- page: /reference/metrics/slo-sli-reference
+  file: docs/reference/metrics/slo-sli-reference.mdx
+  title: SLI and SLO Reference
+  status: canonical
+  last_verified: 2026-03-03
+  source_of_truth:
+  - crates/astra-core/src/metrics.rs
+  related_artifacts:
+  - docs/reference/metrics/metric-catalog.md
+- page: /research/benchmark-methodology
+  file: docs/research/benchmark-methodology.mdx
+  title: Benchmark Methodology
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/scripts/validation
+  related_artifacts:
+  - /research/benchmark-results
+  - /reference/metrics/metric-catalog
+- page: /research/benchmark-results
+  file: docs/research/benchmark-results.mdx
+  title: Benchmark Results
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - BENCHMARKS.md
+  - refs/scripts/validation
+  related_artifacts:
+  - /research/benchmark-methodology
+- page: /research/design-decisions
+  file: docs/research/design-decisions.mdx
+  title: Design Decisions and Lessons
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astra-core/src
+  - crates/astrad/src/main.rs
+  related_artifacts:
+  - /research/benchmark-results
+  - /internals/raft-timeline
+- page: /research
+  file: docs/research/index.mdx
+  title: Research and Validation
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - refs/scripts/validation
+  - BENCHMARKS.md
+  related_artifacts:
+  - /research/benchmark-methodology
+  - /research/benchmark-results
+- page: /research/migration-findings
+  file: docs/research/migration-findings.mdx
+  title: Migration Findings
+  status: canonical
+  last_verified: 2026-03-05
+  source_of_truth:
+  - crates/astra-forge/src/main.rs
+  - refs/scripts/validation/phase11-run-all.sh
+  related_artifacts:
+  - /guides/migration-etcd-generic
+  - /guides/migration-omni

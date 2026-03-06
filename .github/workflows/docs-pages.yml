@@ -26,7 +26,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: docs/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -36,14 +35,14 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install docs deps
-        run: npm --prefix docs ci
-
       - name: Install script deps
         run: uv sync --project refs/scripts
 
       - name: Sync generated docs
         run: uv run --project refs/scripts python refs/scripts/docs/sync_docs.py
+
+      - name: Sync public reports
+        run: uv run --project refs/scripts python refs/scripts/public/generate_public_reports.py
 
       - name: Validate docs
         run: uv run --project refs/scripts python refs/scripts/docs/validate_docs.py
@@ -53,7 +52,9 @@ jobs:
         run: uv run --project refs/scripts python refs/scripts/public/validate_public_hygiene.py --repo .
 
       - name: Build
-        run: npm --prefix docs run docs:build
+        env:
+          SPARKIFY_VERSION: 0.2.3
+        run: bash refs/scripts/public/run_sparkify.sh build --docs-dir ./docs --out ./dist --site "https://${{ github.repository_owner }}.github.io" --base "/${{ github.event.repository.name }}" --strict
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -61,7 +62,7 @@ jobs:
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/.vitepress/dist
+          path: ./dist
 
   deploy:
     environment:

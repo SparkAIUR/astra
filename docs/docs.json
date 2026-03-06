@@ -1,0 +1,99 @@
+{
+  "$schema": "https://mintlify.com/schema/docs.json",
+  "theme": "mint",
+  "name": "astra",
+  "colors": {
+    "primary": "#0f766e"
+  },
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "index",
+        "getting-started",
+        "etcd-replacement",
+        "deployment"
+      ]
+    },
+    {
+      "group": "Migration",
+      "pages": [
+        "migration-handbook",
+        "guides/migration-etcd-generic",
+        "guides/migration-k3s",
+        "guides/migration-omni"
+      ]
+    },
+    {
+      "group": "Deployment",
+      "pages": [
+        "guides/deploy-k3s-single-node",
+        "guides/deploy-k3s-cluster",
+        "guides/deploy-omni-with-astra",
+        "operations/deploy-local-compose",
+        "operations/deploy-production"
+      ]
+    },
+    {
+      "group": "Operations",
+      "pages": [
+        "operations/auth-and-tenanting",
+        "operations/backup-and-restore",
+        "operations/profiles-and-auto-governor",
+        "guides/autotune-preview",
+        "operations/monitoring-prometheus-grafana",
+        "operations/troubleshooting",
+        "operations/faq"
+      ]
+    },
+    {
+      "group": "Reference",
+      "pages": [
+        "reference/cli/astrad",
+        "reference/cli/astractl",
+        "reference/cli/astra-forge",
+        "reference/api/etcd-kv-watch-lease",
+        "reference/api/astra-admin-bulkload",
+        "reference/api/internal-raft",
+        "reference/config/env-vars",
+        "reference/config/docker-compose-reference",
+        "reference/metrics/metric-catalog",
+        "reference/metrics/slo-sli-reference"
+      ]
+    },
+    {
+      "group": "Research",
+      "pages": [
+        "research/index",
+        "research/benchmark-methodology",
+        "research/benchmark-results",
+        "research/design-decisions",
+        "research/migration-findings"
+      ]
+    },
+    {
+      "group": "Architecture and Internals",
+      "pages": [
+        "architecture",
+        "internals/architecture-overview",
+        "internals/write-path",
+        "internals/read-path",
+        "internals/watch-ring",
+        "internals/raft-timeline",
+        "internals/qos-and-lanes",
+        "internals/memory-and-backpressure",
+        "internals/tiering-and-s3",
+        "internals/testing-and-validation-harness"
+      ]
+    },
+    {
+      "group": "Contributing",
+      "pages": [
+        "contribute/contributing",
+        "contribute/docs-style-guide",
+        "contribute/docs-source-of-truth",
+        "contribute/adr-index"
+      ]
+    }
+  ]
+}

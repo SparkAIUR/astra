@@ -1,0 +1,50 @@
+---
+title: Deploy a K3s Cluster with Astra
+summary: Run a multi-node K3s control plane against a dedicated Astra cluster.
+audience: operators
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - crates/astrad/src/main.rs
+  - refs/scripts/validation/phase6-k3s-benchmark.sh
+related_artifacts:
+  - /guides/deploy-k3s-single-node
+  - /guides/migration-k3s
+---
+
+# Deploy a K3s cluster with Astra
+
+Use this model when you want Astra to be its own replicated datastore tier instead of sharing a host with K3s.
+
+## Topology
+
+- 3 Astra nodes minimum for the control-plane datastore
+- 1 or 3 K3s server nodes depending on your HA target
+- additional worker nodes as needed
+
+## Design rules
+
+- keep Astra peer traffic and client traffic explicit,
+- give K3s all Astra client endpoints in `--datastore-endpoint`,
+- reserve memory and IO for Astra instead of treating it like a sidecar,
+- validate `kubectl get crd`, LIST-heavy workloads, and watch fanout before production cutover.
+
+## Example K3s server install
+
+```bash
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_EXEC="server \
+    --write-kubeconfig-mode 644 \
+    --disable servicelb \
+    --snapshotter stargz \
+    --datastore-endpoint 'http://10.0.0.11:2379,http://10.0.0.12:2379,http://10.0.0.13:2379'" \
+  sh -
+```
+
+## Validation checklist
+
+- all K3s servers are `Ready`
+- Astra quorum is healthy across all client endpoints
+- CRD discovery succeeds without chunk-size workarounds
+- ingress and storage smoke tests succeed
+- restart behavior is predictable after host or node reboots

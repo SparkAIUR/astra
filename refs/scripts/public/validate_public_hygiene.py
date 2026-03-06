@@ -10,6 +10,7 @@ from pathlib import Path
 
 TEXT_EXTS = {
     ".md",
+    ".mdx",
     ".txt",
     ".yaml",
     ".yml",

@@ -1,0 +1,49 @@
+---
+title: Astra
+summary: Astra is an etcd-compatible control-plane datastore focused on Kubernetes, Omni, and high-churn metadata workloads.
+audience: both
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - README.md
+  - crates/astrad/src/main.rs
+related_artifacts:
+  - /getting-started
+  - /etcd-replacement
+  - /research/benchmark-results
+---
+
+# Astra
+
+Astra is a control-plane datastore for workloads that want etcd semantics without inheriting etcd’s scaling ceilings as-is.
+
+It keeps the etcd client contract where it matters for real control planes, then layers in:
+
+- disaggregated storage and object-tier options,
+- tenant virtualization for shared control-plane infrastructure,
+- workload-aware batching and QoS controls,
+- migration tooling for etcd snapshots and multi-source cutovers,
+- validated deployment paths for K3s and Omni.
+
+## Start here
+
+- New user: [/getting-started](/getting-started)
+- Replacing etcd: [/etcd-replacement](/etcd-replacement)
+- Running K3s on Astra: [/guides/deploy-k3s-single-node](/guides/deploy-k3s-single-node)
+- Running Omni on Astra: [/guides/deploy-omni-with-astra](/guides/deploy-omni-with-astra)
+- Migration tooling: [/guides/migration-etcd-generic](/guides/migration-etcd-generic) and [/guides/migration-omni](/guides/migration-omni)
+- Benchmarks and research: [/research/benchmark-results](/research/benchmark-results)
+
+## What Astra is good at
+
+- Kubernetes and K3s control-plane state
+- shared multi-tenant control-plane backends
+- Omni external-etcd backends
+- control planes that need predictable behavior under watch fanout, LIST pressure, or disk constraints
+
+## What to read next
+
+- [/deployment](/deployment) for deployment choices
+- [/operations/troubleshooting](/operations/troubleshooting) for common failure modes
+- [/reference/config/env-vars](/reference/config/env-vars) for runtime tuning
+- [/research/design-decisions](/research/design-decisions) for the why behind the implementation

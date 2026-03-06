@@ -11,6 +11,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 DEFAULT_OUTPUT = DEFAULT_DOCS_DIR / ".meta/source-map.yaml"
+DOC_SUFFIXES = {".md", ".mdx"}
 
 
 def parse_frontmatter(markdown_path: Path) -> dict:
@@ -26,8 +27,12 @@ def parse_frontmatter(markdown_path: Path) -> dict:
 
 def page_from_path(path: Path, docs_dir: Path) -> str:
     rel = path.relative_to(docs_dir).as_posix()
-    if rel.endswith("/index.md"):
+    if rel.endswith("/index.mdx"):
+        rel = rel[: -len("index.mdx")]
+    elif rel.endswith("/index.md"):
         rel = rel[: -len("index.md")]
+    elif rel.endswith(".mdx"):
+        rel = rel[: -len(".mdx")]
     elif rel.endswith(".md"):
         rel = rel[: -len(".md")]
     if not rel.startswith("/"):
@@ -37,7 +42,9 @@ def page_from_path(path: Path, docs_dir: Path) -> str:
 
 def build_source_map(docs_dir: Path) -> dict:
     entries = []
-    for md in sorted(docs_dir.rglob("*.md")):
+    for md in sorted(docs_dir.rglob("*")):
+        if md.suffix.lower() not in DOC_SUFFIXES:
+            continue
         parts = md.relative_to(docs_dir).parts
         if any(part.startswith(".") for part in parts):
             continue

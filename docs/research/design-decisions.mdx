@@ -1,0 +1,35 @@
+---
+title: Design Decisions and Lessons
+summary: The major implementation decisions that materially changed Astra’s behavior and benchmark results.
+audience: both
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - crates/astra-core/src
+  - crates/astrad/src/main.rs
+related_artifacts:
+  - /research/benchmark-results
+  - /internals/raft-timeline
+---
+
+# Design Decisions and Lessons
+
+## 1. Treat queue wait and quorum ack as first-class signals
+
+Astra’s later tuning work improved once queue wait and quorum-ack timing were measured explicitly instead of treating all p99 growth as one problem.
+
+## 2. Protect critical lease and lock traffic semantically
+
+Astra classifies Tier-0 paths and gives them a dedicated fast lane so Kubernetes and database leader-election traffic stay alive under broader write pressure.
+
+## 3. Tune by workload shape, not one universal profile
+
+The same settings that look good under synthetic put throughput can destabilize real control-plane paths. That is why Astra carries workload-oriented profiles and an auto-governor instead of one universal knob set.
+
+## 4. Separate public migration and public operations from private experimentation
+
+The public repo should expose reproducible migration and deployment paths, while internal phase reports, rough notes, and unpublished experiments stay in ignored `refs/` working space.
+
+## 5. Favor validation harnesses that explain failure modes
+
+The most useful harnesses are the ones that tell operators why a gate failed: memory pressure, iowait, watch lag, forwarded read limits, or stale image caches. That principle shaped the public troubleshooting guidance and benchmark reporting.

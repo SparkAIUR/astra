@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import re
 import shutil
@@ -106,6 +107,7 @@ def is_probably_text(path: Path) -> bool:
     ext = path.suffix.lower()
     return ext in {
         ".md",
+        ".mdx",
         ".txt",
         ".yaml",
         ".yml",
@@ -129,7 +131,7 @@ def sanitize_docs_frontmatter(dest_repo: Path, private_patterns: list[str]) -> i
         return 0
 
     changed = 0
-    for md in sorted(docs_dir.rglob("*.md")):
+    for md in sorted(list(docs_dir.rglob("*.md")) + list(docs_dir.rglob("*.mdx"))):
         if "node_modules" in md.parts:
             continue
 
@@ -184,6 +186,44 @@ def sanitize_docs_frontmatter(dest_repo: Path, private_patterns: list[str]) -> i
 
 
 def sanitize_docs_nav(dest_repo: Path) -> bool:
+    docs_json = dest_repo / "docs/docs.json"
+    if docs_json.exists():
+        data = json.loads(docs_json.read_text(encoding="utf-8"))
+        nav = data.get("navigation")
+        if not isinstance(nav, list):
+            return False
+
+        def page_exists(page: str) -> bool:
+            rel = page.lstrip("/")
+            for suffix in (".mdx", ".md", "/index.mdx", "/index.md"):
+                if (dest_repo / "docs" / f"{rel}{suffix}").exists():
+                    return True
+            return False
+
+        changed = False
+        cleaned_nav = []
+        for group in nav:
+            if not isinstance(group, dict):
+                changed = True
+                continue
+            pages = group.get("pages")
+            if not isinstance(pages, list):
+                cleaned_nav.append(group)
+                continue
+            filtered = [page for page in pages if isinstance(page, str) and page_exists(page)]
+            if filtered != pages:
+                changed = True
+            if filtered:
+                updated = dict(group)
+                updated["pages"] = filtered
+                cleaned_nav.append(updated)
+            else:
+                changed = True
+        if changed:
+            data["navigation"] = cleaned_nav
+            docs_json.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        return changed
+
     cfg = dest_repo / "docs/.vitepress/config.mjs"
     if not cfg.exists():
         return False

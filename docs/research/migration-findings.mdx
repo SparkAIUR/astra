@@ -1,0 +1,34 @@
+---
+title: Migration Findings
+summary: What the Astra migration work proved for etcd snapshots, K3s cutovers, and Omni fleets.
+audience: both
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - crates/astra-forge/src/main.rs
+  - refs/scripts/validation/phase11-run-all.sh
+related_artifacts:
+  - /guides/migration-etcd-generic
+  - /guides/migration-omni
+---
+
+# Migration Findings
+
+## Generic etcd snapshots
+
+The `astra-forge` toolchain proved out the snapshot-to-manifest-to-bulk-load path, which is the core public migration contract for existing etcd-backed systems.
+
+## K3s cutovers
+
+The K3s work showed that Astra can function as the external datastore, but the production path needs explicit resource budgets and host defaults rather than benchmark-grade compose settings.
+
+## Omni fleets
+
+The Omni work proved two important points:
+
+- multiple Omni tenants can share one Astra backend safely when tenant identity is enforced correctly,
+- the operationally safe model is per-tenant service-account tokens with a local auth proxy, not direct human tokens on the etcd path.
+
+## Public takeaway
+
+Migration is not just about importing keys. It is also about boot behavior, token handling, rollout safety, and failure recovery. The public guides in this repo are written from that broader definition.

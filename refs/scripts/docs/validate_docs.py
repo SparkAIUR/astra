@@ -11,6 +11,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DOCS_DIR = REPO_ROOT / "docs"
 DEFAULT_SOURCE_MAP = DEFAULT_DOCS_DIR / ".meta/source-map.yaml"
+DOC_SUFFIXES = {".md", ".mdx"}
 
 REQUIRED_KEYS = {
     "title",
@@ -58,13 +59,33 @@ def resolve_markdown_link(link: str, base_file: Path, docs_dir: Path) -> Path | 
     if candidate.suffix:
         return candidate
 
+    mdx_candidate = candidate.with_suffix(".mdx")
+    if mdx_candidate.exists():
+        return mdx_candidate
     md_candidate = candidate.with_suffix(".md")
     if md_candidate.exists():
         return md_candidate
+    index_mdx_candidate = candidate / "index.mdx"
+    if index_mdx_candidate.exists():
+        return index_mdx_candidate
     index_candidate = candidate / "index.md"
     if index_candidate.exists():
         return index_candidate
-    return md_candidate
+    return mdx_candidate
+
+
+def iter_docs(docs_dir: Path) -> list[Path]:
+    docs: list[Path] = []
+    for path in sorted(docs_dir.rglob("*")):
+        if path.suffix.lower() not in DOC_SUFFIXES:
+            continue
+        parts = path.relative_to(docs_dir).parts
+        if any(part.startswith(".") for part in parts):
+            continue
+        if parts and parts[0] in {"node_modules", "dist"}:
+            continue
+        docs.append(path)
+    return docs
 
 
 def validate_source_path(value: str) -> bool:
@@ -86,19 +107,25 @@ def load_source_map(path: Path) -> set[str]:
     return files
 
 
+def validate_related_target(target: str, base_file: Path, docs_dir: Path) -> bool:
+    if is_external_target(target):
+        return True
+
+    if validate_source_path(target):
+        return True
+
+    resolved = resolve_markdown_link(target, base_file, docs_dir)
+    if resolved is None:
+        return False
+    return resolved.exists()
+
+
 def validate_docs(docs_dir: Path, source_map: Path) -> list[str]:
     errors: list[str] = []
     source_map_files = load_source_map(source_map)
 
-    for md in sorted(docs_dir.rglob("*.md")):
+    for md in iter_docs(docs_dir):
         rel = md.relative_to(REPO_ROOT).as_posix()
-        parts = md.relative_to(docs_dir).parts
-        if any(part.startswith(".") for part in parts):
-            continue
-        if parts and parts[0] in {"node_modules"}:
-            continue
-        if parts and parts[0] in {"dist"}:
-            continue
 
         frontmatter, body = parse_frontmatter(md)
         if not frontmatter:
@@ -131,7 +158,7 @@ def validate_docs(docs_dir: Path, source_map: Path) -> list[str]:
                 errors.append(f"{rel}: related_artifacts must be a list")
             else:
                 for target in related:
-                    if isinstance(target, str) and not validate_source_path(target):
+                    if isinstance(target, str) and not validate_related_target(target, md, docs_dir):
                         errors.append(f"{rel}: related_artifacts target does not exist: {target}")
 
         if source_map_files and rel not in source_map_files:

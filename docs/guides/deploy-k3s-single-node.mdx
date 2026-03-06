@@ -1,0 +1,69 @@
+---
+title: Deploy K3s on a Single Node with Astra
+summary: Use the production single-node deploy automation to run K3s and Astra on the same host safely.
+audience: operators
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - refs/scripts/deploy/deploy-k3s-single-node-remote.sh
+  - refs/scripts/deploy/docker-compose.k3s-single-node.production.yml
+related_artifacts:
+  - /operations/deploy-production
+  - /operations/troubleshooting
+---
+
+# Deploy K3s on a single node with Astra
+
+This is the recommended production path when you want one host to run both Astra and K3s.
+
+## Why use the production deploy path
+
+The single-node production deploy script bakes in the fixes learned from real K3s+Astra failure modes:
+
+- Astra-first startup ordering before `k3s` begins,
+- higher production memory defaults for Astra containers,
+- `servicelb` disabled by default so you can use MetalLB or Inlets,
+- `snapshotter: stargz` enabled by default,
+- optional external object-tier and archive backup wiring.
+
+## Remote-driven deployment
+
+```bash
+refs/scripts/deploy/deploy-k3s-single-node-remote.sh \
+  --host root@<host-ip> \
+  --cluster-name <cluster-name> \
+  --kubeconfig-server-ip <host-ip> \
+  -- \
+  --disk-device auto \
+  --astra-data-root /var/lib/astra \
+  --astra-container-memory-limit 2048M \
+  --validation full
+```
+
+## Important defaults
+
+- `servicelb` is disabled unless you pass `--enable-servicelb`
+- `snapshotter` defaults to `stargz` unless you override `--snapshotter`
+- Astra container memory defaults to `2048M` in this path
+- Astra state is bind-mounted under `/var/lib/astra` unless you override it
+
+## Storage and ingress
+
+Use a dedicated local filesystem for K3s local-path storage and advertise the host IP you expect Traefik to serve.
+
+If you are converting an existing node from `overlayfs` to `stargz`, expect a one-time cache refresh for any image with stale content metadata. The narrow fix is to remove the affected image with `crictl rmi <image>` and let kubelet pull it again.
+
+## Post-deploy checks
+
+```bash
+kubectl get nodes -o wide
+kubectl get --raw=/readyz
+etcdctl --endpoints=http://127.0.0.1:52379 get /registry/ --prefix --keys-only | head
+```
+
+## Recommended follow-through
+
+- add backup/archive settings before production cutover,
+- run a stress smoke after deployment,
+- keep [/operations/troubleshooting](/operations/troubleshooting) nearby for OOM and CRD-list failure modes.

@@ -1,0 +1,66 @@
+---
+title: Getting Started
+summary: Bring up Astra locally, validate etcd compatibility, and learn the next operator paths.
+audience: operators
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - quickstart.sh
+  - docker-compose.yaml
+related_artifacts:
+  - /reference/config/docker-compose-reference
+  - /operations/monitoring-prometheus-grafana
+---
+
+# Getting Started
+
+This path is the fastest way to verify that Astra behaves like an etcd replacement for basic control-plane operations.
+
+## Prerequisites
+
+- Docker Engine with the Compose plugin
+- Open local ports: `2379`, `32391`, `32392`, `9000`, `9001`, `9090`, `3000`
+- Optional: `etcdctl` if you want a native etcd client instead of the bundled smoke commands
+
+## Start the local sandbox
+
+```bash
+./quickstart.sh
+```
+
+The sandbox starts:
+
+- a 3-node Astra cluster,
+- MinIO for object-tier experiments,
+- Prometheus and Grafana,
+- a traffic-generation container for local load tests.
+
+## Validate basic etcd compatibility
+
+```bash
+docker run --rm --network host quay.io/coreos/etcd:v3.6.8 \
+  etcdctl --endpoints=http://127.0.0.1:2379 put /quickstart/hello astra
+
+docker run --rm --network host quay.io/coreos/etcd:v3.6.8 \
+  etcdctl --endpoints=http://127.0.0.1:2379 get /quickstart/hello
+```
+
+## Inspect the runtime
+
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000`
+
+The most useful first metrics are:
+
+- queue-wait p99
+- quorum-ack p99
+- write latency
+- profile switches
+- watch and LIST behavior under load
+
+## Next steps
+
+- Replace an etcd-backed app: [/etcd-replacement](/etcd-replacement)
+- Run K3s on Astra: [/guides/deploy-k3s-single-node](/guides/deploy-k3s-single-node)
+- Run Omni on Astra: [/guides/deploy-omni-with-astra](/guides/deploy-omni-with-astra)
+- Learn the migration toolchain: [/guides/migration-etcd-generic](/guides/migration-etcd-generic)

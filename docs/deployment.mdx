@@ -1,0 +1,36 @@
+---
+title: Deployment Overview
+summary: Choose the right Astra deployment model for local development, single-node K3s, clustered K3s, or Omni.
+audience: operators
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - refs/scripts/deploy/deploy-k3s-single-node.sh
+  - docker-compose.yml
+related_artifacts:
+  - /guides/deploy-k3s-single-node
+  - /guides/deploy-k3s-cluster
+  - /guides/deploy-omni-with-astra
+---
+
+# Deployment Overview
+
+Use this page to pick the right Astra topology before you start wiring clients to it.
+
+## Recommended deployment choices
+
+| Scenario | Recommended path |
+| --- | --- |
+| Local development and API exploration | [/operations/deploy-local-compose](/operations/deploy-local-compose) |
+| Single-node K3s on one host | [/guides/deploy-k3s-single-node](/guides/deploy-k3s-single-node) |
+| Multi-node K3s cluster | [/guides/deploy-k3s-cluster](/guides/deploy-k3s-cluster) |
+| Omni with Keycloak-backed tenancy | [/guides/deploy-omni-with-astra](/guides/deploy-omni-with-astra) |
+| Production hardening and backups | [/operations/deploy-production](/operations/deploy-production) |
+
+## Deployment rules that matter
+
+- keep explicit resource budgets for Astra in production,
+- treat benchmark compose defaults as test profiles, not operating defaults,
+- make boot ordering explicit when K3s depends on Astra locally,
+- keep object-tier or backup configuration deliberate rather than accidental,
+- validate control-plane add-ons against Astra memory and read-path behavior before rolling them broadly.

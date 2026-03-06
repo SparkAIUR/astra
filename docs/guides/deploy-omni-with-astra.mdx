@@ -1,0 +1,59 @@
+---
+title: Deploy Omni on Astra
+summary: Run Omni against Astra with per-tenant OIDC service-account tokens and the local Astra auth proxy.
+audience: operators
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - refs/sandbox/omni/README.md
+  - refs/sandbox/omni/keycloak/README.md
+  - crates/astractl/src/oidc_proxy.rs
+related_artifacts:
+  - /guides/migration-omni
+  - /operations/auth-and-tenanting
+---
+
+# Deploy Omni on Astra
+
+The supported public sandbox model is:
+
+- Keycloak-backed OIDC for Omni users and Astra service accounts,
+- one Astra tenant per Omni release,
+- one local `astractl oidc-proxy` sidecar per Omni release,
+- a shared Astra cluster backing multiple Omni tenants.
+
+## Public sandbox assets
+
+- `/refs/sandbox/omni/cluster` for the shared Astra StatefulSet and services
+- `/refs/sandbox/omni/helm` for Omni Helm values and sidecar secrets
+- `/refs/sandbox/omni/keycloak` for realm and client provisioning
+- `/refs/sandbox/omni/migration` for importing raw Omni etcd snapshots
+
+## Tenant model
+
+- human users authenticate to Omni and carry tenant memberships in `groups`
+- Astra receives service-account tokens only
+- each Omni tenant gets a dedicated Astra service client with one `tenant_id` claim
+
+## Keycloak setup
+
+Start with the generic realm config example:
+
+```bash
+uv run --project refs/scripts python refs/scripts/keycloak/provision_omni_realm.py \
+  --config refs/sandbox/omni/keycloak/realm-config.example.yaml \
+  --mode validate
+```
+
+## Render the Omni chart
+
+```bash
+helm template tenant-a /path/to/omni/chart \
+  -n sidero \
+  -f refs/sandbox/omni/helm/omni-values.base.yaml \
+  -f refs/sandbox/omni/helm/omni-values.instance.example.yaml
+```
+
+## When to use the migration job
+
+Use the migration job when you already have Omni etcd snapshots and want Astra to become the external-etcd backend without re-seeding every tenant by hand.

@@ -9,7 +9,10 @@ excludes:
   - "target/**"
   - "data/**"
   - "docs/node_modules/**"
+  - "docs/.vitepress/**"
   - "docs/.vitepress/dist/**"
+  - "docs/package.json"
+  - "docs/package-lock.json"
 
   # private operator memory and planning
   - "AGENTS.md"
@@ -25,6 +28,7 @@ excludes:
   - "refs/scripts/validation/results/**"
   - "refs/scripts/data/*.db"
   - "refs/scripts/.venv/**"
+  - "refs/sandbox/private/**"
 
   # public docs should not expose internal history sections
   - "docs/archive/**"
@@ -42,7 +46,7 @@ private_reference_patterns:
   - "refs/scripts/validation/results/"
 
 text_rewrites:
-  - pattern: "halceon/astra"
+  - pattern: "halceon/astra-alpha"
     replacement: "halceon/astra"
 
 commit_buckets:
@@ -68,6 +72,7 @@ commit_buckets:
     message: "ops: add containerization and local sandbox stack"
     includes:
       - "Dockerfile"
+      - "Dockerfile.forge"
       - "docker-compose.yml"
       - "docker-compose.yaml"
       - "docker-compose.blkio.yml"

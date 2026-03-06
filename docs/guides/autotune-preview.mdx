@@ -1,0 +1,47 @@
+---
+title: Autotune CLI Preview
+summary: Planned operator workflow for the future Astra autotune assistant.
+audience: operators
+status: draft
+last_verified: 2026-03-05
+source_of_truth:
+  - docs/operations/profiles-and-auto-governor.md
+  - refs/scripts/validation
+related_artifacts:
+  - /operations/profiles-and-auto-governor
+  - /reference/config/env-vars
+---
+
+# Autotune CLI preview
+
+`autotune` is planned as an operator-facing helper for selecting Astra runtime settings from workload intent and host constraints.
+
+## Current status
+
+This CLI is not shipped yet.
+
+Use this page as the design contract for future operator guidance, not as a GA command reference.
+
+## Planned inputs
+
+- workload type: `kubernetes`, `omni`, `gateway`, or mixed
+- host profile: CPU, RAM, disk class, network shape
+- durability model: local only vs object-tier or archive backup
+- deployment mode: single-node, cluster, or shared multi-tenant backend
+- target guardrails: p99 budget, cardinality target, watch fanout expectations
+
+## Planned outputs
+
+- recommended Astra profile
+- suggested batching and queue-depth settings
+- read/LIST path recommendations
+- watch dispatch and tenant/auth hints
+- warnings when the target host shape is too small for the requested scenario
+
+## Until the CLI ships
+
+Use the existing controls directly:
+
+- start from the profile guidance in [/operations/profiles-and-auto-governor](/operations/profiles-and-auto-governor)
+- inspect [/reference/config/env-vars](/reference/config/env-vars)
+- validate every tuning change with the harness scripts in `refs/scripts/validation/`

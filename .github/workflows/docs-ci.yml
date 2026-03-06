@@ -19,7 +19,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: docs/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -29,20 +28,22 @@ jobs:
       - name: Setup uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install docs deps
-        run: npm --prefix docs ci
-
       - name: Install script deps
         run: uv sync --project refs/scripts --extra dev
 
       - name: Regenerate docs artifacts
         run: uv run --project refs/scripts python refs/scripts/docs/sync_docs.py
 
+      - name: Regenerate public reports
+        run: uv run --project refs/scripts python refs/scripts/public/generate_public_reports.py
+
       - name: Enforce generated artifacts committed
         run: |
           git diff --exit-code \
+            BENCHMARKS.md \
             docs/reference/config/env-vars.md \
             docs/reference/metrics/metric-catalog.md \
+            docs/research/benchmark-results.mdx \
             docs/.meta/source-map.yaml
 
       - name: Validate docs metadata and links
@@ -56,4 +57,6 @@ jobs:
         run: uv run --project refs/scripts python refs/scripts/public/validate_public_hygiene.py --repo .
 
       - name: Build docs
-        run: npm --prefix docs run docs:build
+        env:
+          SPARKIFY_VERSION: 0.2.3
+        run: bash refs/scripts/public/run_sparkify.sh build --docs-dir ./docs --out ./dist-ci --site "https://${{ github.repository_owner }}.github.io" --base "/${{ github.event.repository.name }}" --strict

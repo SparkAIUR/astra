@@ -1,0 +1,42 @@
+---
+title: Benchmark Methodology
+summary: How Astra benchmarks are structured, compared, and interpreted.
+audience: both
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - refs/scripts/validation
+related_artifacts:
+  - /research/benchmark-results
+  - /reference/metrics/metric-catalog
+---
+
+# Benchmark Methodology
+
+Astra benchmarks are built around control-plane realism, not synthetic throughput alone.
+
+## Ground rules
+
+- compare Astra and etcd under the same workload shape,
+- capture machine-readable output for every public benchmark claim,
+- keep correctness gates alongside latency and throughput metrics,
+- inspect stage telemetry rather than only aggregate p99.
+
+## What we measure
+
+- write and read tail latency
+- LIST behavior at large cardinality
+- watch fanout behavior and lag
+- queue wait, quorum ack, and apply timing
+- CPU iowait, memory, and disk behavior
+- migration correctness and cutover stability
+
+## How to read public benchmark claims
+
+Astra benchmark claims in this repo are anchored to:
+
+- tracked benchmark datasets in `docs/research/data/`
+- generated public summaries such as `BENCHMARKS.md`
+- specific validation harnesses under `refs/scripts/validation/`
+
+That means the public docs can be regenerated when the underlying benchmark dataset changes.

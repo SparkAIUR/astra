@@ -1,0 +1,47 @@
+---
+title: Use Astra as an etcd Replacement
+summary: Pick the right migration and deployment path when replacing etcd with Astra.
+audience: operators
+status: canonical
+last_verified: 2026-03-05
+source_of_truth:
+  - crates/astra-proto/proto/rpc.proto
+  - crates/astra-forge/src/main.rs
+related_artifacts:
+  - /guides/migration-etcd-generic
+  - /guides/migration-k3s
+  - /guides/migration-omni
+---
+
+# Use Astra as an etcd replacement
+
+Astra is designed to sit behind software that already expects etcd gRPC semantics.
+
+## Choose your path
+
+- Generic etcd workload: [/guides/migration-etcd-generic](/guides/migration-etcd-generic)
+- K3s datastore replacement: [/guides/migration-k3s](/guides/migration-k3s)
+- Omni external-etcd backend: [/guides/migration-omni](/guides/migration-omni)
+
+## Before you switch
+
+Validate these assumptions first:
+
+- your workload is within Astra’s validated etcd compatibility surface,
+- you have a rollback plan for the old datastore,
+- you know whether you need single-tenant or multi-tenant Astra,
+- you know whether the workload will attach JWTs directly or needs a proxy layer.
+
+## Migration building blocks
+
+- `astra-forge compile` for snapshot or endpoint extraction
+- `astra-forge bulk-load` for manifest import
+- `astra-forge converge` for multi-source cutovers
+- `astractl` and `etcdctl` for smoke validation after import
+
+## Production defaults to keep
+
+- prefer explicit image tags such as `docker.io/halceon/astra:v0.1.1-rc1`,
+- keep K3s `servicelb` disabled when you plan to use MetalLB or Inlets,
+- use `snapshotter: stargz` deliberately and refresh stale cached images when migrating an existing node,
+- do not reuse the low-memory benchmark compose profile as a production baseline.
