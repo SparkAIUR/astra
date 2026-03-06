@@ -12,7 +12,10 @@
         "index",
         "getting-started",
         "etcd-replacement",
-        "deployment"
+        "deployment",
+        "concepts/control-plane-compatibility",
+        "concepts/consistency-model",
+        "concepts/tenant-virtualization"
       ]
     },
     {
@@ -27,6 +30,7 @@
     {
       "group": "Deployment",
       "pages": [
+        "guides/deploy-k3s-with-astra",
         "guides/deploy-k3s-single-node",
         "guides/deploy-k3s-cluster",
         "guides/deploy-omni-with-astra",
@@ -41,6 +45,8 @@
         "operations/backup-and-restore",
         "operations/profiles-and-auto-governor",
         "guides/autotune-preview",
+        "guides/performance-tuning",
+        "guides/disaster-recovery",
         "operations/monitoring-prometheus-grafana",
         "operations/troubleshooting",
         "operations/faq"

@@ -26,7 +26,7 @@ This guide shows two deployment patterns:
 
 - Linux host(s) with Docker and `k3s`, `kubectl`, `etcdctl` available.
 - Network reachability from all K3s server nodes to all Astra client endpoints.
-- Astra image published as stable semver tags (`vX.Y.Z`) in:
+- Astra image published in Docker Hub. Stable semver tags (`vX.Y.Z`) are the default production channel, while prerelease tags such as `v0.1.1-rc1` should be selected explicitly when validating release candidates:
   - `docker.io/halceon/astra:{tag}`
   - `docker.io/nudevco/astra:{tag}`
 
@@ -74,7 +74,7 @@ Default behavior of the deploy scripts:
 
 - Remote script bootstraps the host, syncs `https://github.com/SparkAIUR/astra.git` on `main`, runs the on-host deploy, and pulls kubeconfig locally.
 - Remote script can generate multiple local kubeconfigs with `--kubeconfig-server-ip` (for dual access via tailscale + LAN) and can rename kubeconfig cluster/context/user names with `--cluster-name`.
-- On-host deploy resolves the latest stable semver tag from `docker.io/halceon/astra` unless `--astra-image` or `--astra-tag` is provided.
+- On-host deploy resolves the latest stable semver tag from `docker.io/halceon/astra` unless `--astra-image` or `--astra-tag` is provided. Use an explicit prerelease tag when validating an RC build.
 - Validation defaults to `smoke` (fast), with `--validation full` for the 720s readiness gate.
 - Disk setup is only executed when `--disk-device` is set (`auto` or explicit path).
 

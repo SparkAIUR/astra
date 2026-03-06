@@ -30,10 +30,10 @@ docker run --rm --network host quay.io/coreos/etcd:v3.6.8 \
 
 ## Common paths
 
-- Replace etcd: [`docs/etcd-replacement.mdx`](docs/etcd-replacement.mdx)
-- Run K3s on Astra: [`docs/guides/deploy-k3s-single-node.mdx`](docs/guides/deploy-k3s-single-node.mdx)
-- Run Omni on Astra: [`docs/guides/deploy-omni-with-astra.mdx`](docs/guides/deploy-omni-with-astra.mdx)
-- Benchmark results: [`BENCHMARKS.md`](BENCHMARKS.md)
+- Replace etcd: <https://sparkaiur.github.io/astra/etcd-replacement>
+- Run K3s on Astra: <https://sparkaiur.github.io/astra/guides/deploy-k3s-single-node>
+- Run Omni on Astra: <https://sparkaiur.github.io/astra/guides/deploy-omni-with-astra>
+- Benchmark results: <https://sparkaiur.github.io/astra/research/benchmark-results>
 
 ## Docs
 
@@ -73,4 +73,4 @@ make docs-check
 
 ## License
 
-Licensed under Apache-2.0. See [`LICENSE`](LICENSE).
+Licensed under Apache-2.0. See <https://github.com/SparkAIUR/astra/blob/main/LICENSE>.
