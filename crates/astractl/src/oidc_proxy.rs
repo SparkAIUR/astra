@@ -34,7 +34,12 @@ pub struct OidcProxyArgs {
     #[arg(long, env = "ASTRA_PROXY_LISTEN_ADDR", default_value = "0.0.0.0:23790")]
     pub listen_addr: String,
 
-    #[arg(long = "upstream", env = "ASTRA_PROXY_UPSTREAMS", value_delimiter = ',', required = true)]
+    #[arg(
+        long = "upstream",
+        env = "ASTRA_PROXY_UPSTREAMS",
+        value_delimiter = ',',
+        required = true
+    )]
     pub upstreams: Vec<String>,
 
     #[arg(long, env = "ASTRA_PROXY_ISSUER")]
@@ -316,7 +321,11 @@ async fn refresh_loop(state: Arc<ProxyState>, client: Client, config: ProxyConfi
                     })
                     .await;
                 sleep_for = token.refresh_in;
-                info!(expires_in_secs, refresh_in_secs = sleep_for.as_secs(), "refreshed OIDC access token for Astra proxy");
+                info!(
+                    expires_in_secs,
+                    refresh_in_secs = sleep_for.as_secs(),
+                    "refreshed OIDC access token for Astra proxy"
+                );
             }
             Err(err) => {
                 warn!(error = %err, retry_in_secs = config.refresh_backoff.as_secs(), "failed to refresh OIDC access token for Astra proxy");

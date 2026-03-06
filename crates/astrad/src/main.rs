@@ -3129,7 +3129,9 @@ fn forwarded_client_endpoint(target: &str) -> Result<tonic::transport::Endpoint,
     };
 
     tonic::transport::Endpoint::from_shared(endpoint.clone()).map_err(|err| {
-        Status::invalid_argument(format!("invalid forwarded leader endpoint {endpoint}: {err}"))
+        Status::invalid_argument(format!(
+            "invalid forwarded leader endpoint {endpoint}: {err}"
+        ))
     })
 }
 
