@@ -45,7 +45,7 @@ PACKAGES=(astra-proto astra-core astractl astrad astra-forge)
 
 crate_exists() {
   local pkg=${1:?pkg required}
-  (cd /tmp && cargo info "${pkg}" 2>/dev/null | grep -q "version: ${VERSION}")
+  curl --silent --show-error --fail "https://crates.io/api/v1/crates/${pkg}/${VERSION}" >/dev/null
 }
 
 publish_or_skip() {
