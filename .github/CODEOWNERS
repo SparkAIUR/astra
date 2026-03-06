@@ -1,0 +1,11 @@
+# Update these owners if the primary maintainer handles or teams change.
+* @SparkAIUR
+
+/crates/ @SparkAIUR
+/docs/ @SparkAIUR
+/refs/scripts/ @SparkAIUR
+/refs/sandbox/ @SparkAIUR
+/.github/ @SparkAIUR
+/Makefile @SparkAIUR
+/README.md @SparkAIUR
+/CHANGELOG.md @SparkAIUR

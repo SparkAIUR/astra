@@ -2,9 +2,10 @@
 - 
 
 ## Validation
+- [ ] `make scripts-test`
 - [ ] `uv run --project refs/scripts python refs/scripts/docs/sync_docs.py`
 - [ ] `uv run --project refs/scripts python refs/scripts/docs/validate_docs.py`
-- [ ] `npm --prefix docs run docs:build`
+- [ ] `SPARKIFY_VERSION=0.2.3 bash refs/scripts/public/run_sparkify.sh build --docs-dir ./docs --out ./dist-pr --site https://sparkaiur.github.io --base /astra --strict`
 
 ## Docs Impact
 - [ ] No user-facing behavior changed.
