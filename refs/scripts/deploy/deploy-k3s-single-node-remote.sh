@@ -32,7 +32,10 @@ Any arguments after `--` are passed to deploy-k3s-single-node.sh on the remote h
 
 Examples:
   deploy-k3s-single-node-remote.sh --host root@162.209.124.74 -- --disk-device auto --validation full
+  deploy-k3s-single-node-remote.sh --host root@vm -- --disk-device auto --astra-container-memory-limit 2048M --validation smoke
+  AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... deploy-k3s-single-node-remote.sh --host root@vm -- --disk-device auto --backup-target external-s3 --s3-endpoint https://<account>.r2.cloudflarestorage.com --s3-bucket astra-prod --validation smoke
   deploy-k3s-single-node-remote.sh --host root@vm --git-ref main -- --astra-tag v0.1.0 --validation smoke
+  deploy-k3s-single-node-remote.sh --host root@vm -- --enable-servicelb --snapshotter overlayfs --validation smoke
   deploy-k3s-single-node-remote.sh --host root@100.110.236.66 --cluster-name hplcpc01 --kubeconfig-server-ip 100.110.236.66 --kubeconfig-server-ip 192.168.148.190 -- --host-public-ip 192.168.148.190 --tls-san 100.110.236.66 --node-name hplcpc01
 USAGE
 }

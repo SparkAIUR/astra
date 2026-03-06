@@ -1,12 +1,6 @@
 x-astra-env: &astra-env
-  ASTRAD_S3_ENDPOINT: http://minio:9000
-  ASTRAD_S3_BUCKET: astra-tier
-  ASTRAD_S3_REGION: us-east-1
-  ASTRAD_S3_PREFIX: astra
-  AWS_ACCESS_KEY_ID: minioadmin
-  AWS_SECRET_ACCESS_KEY: minioadmin
-  ASTRAD_MAX_MEMORY_MB: "256"
-  ASTRAD_TIERING_INTERVAL_SECS: ${ASTRAD_TIERING_INTERVAL_SECS:-30}
+  ASTRAD_MAX_MEMORY_MB: ${ASTRAD_MAX_MEMORY_MB:-1024}
+  ASTRAD_TIERING_INTERVAL_SECS: ${ASTRAD_TIERING_INTERVAL_SECS:-300}
   ASTRAD_DATA_DIR: /app/data
   ASTRAD_RAFT_ADDR: 0.0.0.0:2380
   ASTRAD_WAL_MAX_BATCH_REQUESTS: ${ASTRAD_WAL_MAX_BATCH_REQUESTS:-1000}
@@ -16,9 +10,6 @@ x-astra-env: &astra-env
   ASTRAD_WAL_LOW_LINGER_US: ${ASTRAD_WAL_LOW_LINGER_US:-0}
   ASTRAD_WAL_PENDING_LIMIT: ${ASTRAD_WAL_PENDING_LIMIT:-2000}
   ASTRAD_WAL_SEGMENT_BYTES: ${ASTRAD_WAL_SEGMENT_BYTES:-67108864}
-  ASTRAD_WAL_CHECKPOINT_ENABLED: ${ASTRAD_WAL_CHECKPOINT_ENABLED:-false}
-  ASTRAD_WAL_CHECKPOINT_TRIGGER_BYTES: ${ASTRAD_WAL_CHECKPOINT_TRIGGER_BYTES:-536870912}
-  ASTRAD_WAL_CHECKPOINT_MIN_INTERVAL_SECS: ${ASTRAD_WAL_CHECKPOINT_MIN_INTERVAL_SECS:-300}
   ASTRAD_WAL_IO_ENGINE: ${ASTRAD_WAL_IO_ENGINE:-auto}
   ASTRAD_BG_IO_THROTTLE_ENABLED: ${ASTRAD_BG_IO_THROTTLE_ENABLED:-false}
   ASTRAD_BG_IO_TOKENS_PER_SEC: ${ASTRAD_BG_IO_TOKENS_PER_SEC:-8192}
@@ -45,13 +36,13 @@ x-astra-env: &astra-env
   ASTRAD_LIST_STREAM_ENABLED: ${ASTRAD_LIST_STREAM_ENABLED:-false}
   ASTRAD_LIST_STREAM_CHUNK_BYTES: ${ASTRAD_LIST_STREAM_CHUNK_BYTES:-2097152}
   ASTRAD_READ_ISOLATION_ENABLED: ${ASTRAD_READ_ISOLATION_ENABLED:-true}
-  ASTRAD_SEMANTIC_CACHE_ENABLED: ${ASTRAD_SEMANTIC_CACHE_ENABLED:-false}
+  ASTRAD_SEMANTIC_CACHE_ENABLED: ${ASTRAD_SEMANTIC_CACHE_ENABLED:-true}
   ASTRAD_SEMANTIC_CACHE_PREFIXES: ${ASTRAD_SEMANTIC_CACHE_PREFIXES:-/registry/configmaps/,/registry/secrets/}
   ASTRAD_SEMANTIC_CACHE_MAX_ENTRIES: ${ASTRAD_SEMANTIC_CACHE_MAX_ENTRIES:-20000}
   ASTRAD_SEMANTIC_CACHE_MAX_BYTES: ${ASTRAD_SEMANTIC_CACHE_MAX_BYTES:-268435456}
   ASTRAD_GATEWAY_READ_TICKET_ENABLED: ${ASTRAD_GATEWAY_READ_TICKET_ENABLED:-false}
   ASTRAD_GATEWAY_READ_TICKET_TTL_MS: ${ASTRAD_GATEWAY_READ_TICKET_TTL_MS:-20}
-  ASTRAD_GATEWAY_SINGLEFLIGHT_ENABLED: ${ASTRAD_GATEWAY_SINGLEFLIGHT_ENABLED:-false}
+  ASTRAD_GATEWAY_SINGLEFLIGHT_ENABLED: ${ASTRAD_GATEWAY_SINGLEFLIGHT_ENABLED:-true}
   ASTRAD_GATEWAY_SINGLEFLIGHT_MAX_WAITERS: ${ASTRAD_GATEWAY_SINGLEFLIGHT_MAX_WAITERS:-4096}
   ASTRAD_PUT_BATCH_MAX_REQUESTS: ${ASTRAD_PUT_BATCH_MAX_REQUESTS:-256}
   ASTRAD_PUT_BATCH_MIN_REQUESTS: ${ASTRAD_PUT_BATCH_MIN_REQUESTS:-16}
@@ -70,7 +61,7 @@ x-astra-env: &astra-env
   ASTRAD_PUT_TOKEN_LANE_ENABLED: ${ASTRAD_PUT_TOKEN_LANE_ENABLED:-true}
   ASTRAD_PUT_TOKEN_DICT_MAX_ENTRIES: ${ASTRAD_PUT_TOKEN_DICT_MAX_ENTRIES:-4096}
   ASTRAD_PUT_TOKEN_MIN_REUSE: ${ASTRAD_PUT_TOKEN_MIN_REUSE:-2}
-  ASTRAD_PROFILE: ${ASTRAD_PROFILE:-auto}
+  ASTRAD_PROFILE: ${ASTRAD_PROFILE:-kubernetes}
   ASTRAD_PROFILE_SAMPLE_SECS: ${ASTRAD_PROFILE_SAMPLE_SECS:-5}
   ASTRAD_PROFILE_MIN_DWELL_SECS: ${ASTRAD_PROFILE_MIN_DWELL_SECS:-10}
   ASTRAD_QOS_TIER0_PREFIXES: ${ASTRAD_QOS_TIER0_PREFIXES:-/registry/leases/,/omni/locks/}
@@ -83,17 +74,6 @@ x-astra-env: &astra-env
   ASTRAD_RAFT_SHARED_WAL_REACTOR_ENABLED: ${ASTRAD_RAFT_SHARED_WAL_REACTOR_ENABLED:-true}
   ASTRAD_WATCH_ACCEPT_ROLE: ${ASTRAD_WATCH_ACCEPT_ROLE:-all}
   ASTRAD_WATCH_REDIRECT_HINT: ${ASTRAD_WATCH_REDIRECT_HINT:-}
-  ASTRAD_WATCH_DISPATCH_WORKERS: ${ASTRAD_WATCH_DISPATCH_WORKERS:-8}
-  ASTRAD_WATCH_STREAM_QUEUE_DEPTH: ${ASTRAD_WATCH_STREAM_QUEUE_DEPTH:-64}
-  ASTRAD_WATCH_SLOW_CANCEL_GRACE_MS: ${ASTRAD_WATCH_SLOW_CANCEL_GRACE_MS:-1500}
-  ASTRAD_WATCH_EMIT_BATCH_MAX: ${ASTRAD_WATCH_EMIT_BATCH_MAX:-256}
-  ASTRAD_WATCH_LAGGED_POLICY: ${ASTRAD_WATCH_LAGGED_POLICY:-warn}
-  ASTRAD_WATCH_LAGGED_RESYNC_LIMIT: ${ASTRAD_WATCH_LAGGED_RESYNC_LIMIT:-32}
-  ASTRAD_LARGE_VALUE_MODE: ${ASTRAD_LARGE_VALUE_MODE:-off}
-  ASTRAD_LARGE_VALUE_THRESHOLD_BYTES: ${ASTRAD_LARGE_VALUE_THRESHOLD_BYTES:-4194304}
-  ASTRAD_LARGE_VALUE_UPLOAD_CHUNK_BYTES: ${ASTRAD_LARGE_VALUE_UPLOAD_CHUNK_BYTES:-1048576}
-  ASTRAD_LARGE_VALUE_UPLOAD_TIMEOUT_SECS: ${ASTRAD_LARGE_VALUE_UPLOAD_TIMEOUT_SECS:-120}
-  ASTRAD_LARGE_VALUE_HYDRATE_CACHE_MAX_BYTES: ${ASTRAD_LARGE_VALUE_HYDRATE_CACHE_MAX_BYTES:-536870912}
   ASTRAD_RAFT_TIMELINE_ENABLED: ${ASTRAD_RAFT_TIMELINE_ENABLED:-true}
   ASTRAD_RAFT_TIMELINE_SAMPLE_RATE: ${ASTRAD_RAFT_TIMELINE_SAMPLE_RATE:-64}
   ASTRAD_RAFT_ELECTION_TIMEOUT_MIN_MS: ${ASTRAD_RAFT_ELECTION_TIMEOUT_MIN_MS:-2500}
@@ -101,10 +81,6 @@ x-astra-env: &astra-env
   ASTRAD_RAFT_HEARTBEAT_INTERVAL_MS: ${ASTRAD_RAFT_HEARTBEAT_INTERVAL_MS:-350}
   ASTRAD_RAFT_MAX_PAYLOAD_ENTRIES: ${ASTRAD_RAFT_MAX_PAYLOAD_ENTRIES:-5000}
   ASTRAD_RAFT_REPLICATION_LAG_THRESHOLD: ${ASTRAD_RAFT_REPLICATION_LAG_THRESHOLD:-2048}
-  ASTRAD_RAFT_SNAPSHOT_MAX_CHUNK_BYTES: ${ASTRAD_RAFT_SNAPSHOT_MAX_CHUNK_BYTES:-2097152}
-  ASTRAD_RAFT_SNAPSHOT_LOGS_SINCE_LAST: ${ASTRAD_RAFT_SNAPSHOT_LOGS_SINCE_LAST:-512}
-  ASTRAD_RAFT_MAX_IN_SNAPSHOT_LOG_TO_KEEP: ${ASTRAD_RAFT_MAX_IN_SNAPSHOT_LOG_TO_KEEP:-64}
-  ASTRAD_RAFT_PURGE_BATCH_SIZE: ${ASTRAD_RAFT_PURGE_BATCH_SIZE:-256}
   ASTRAD_GRPC_MAX_CONCURRENT_STREAMS: ${ASTRAD_GRPC_MAX_CONCURRENT_STREAMS:-65535}
   ASTRAD_GRPC_HTTP2_KEEPALIVE_INTERVAL_MS: ${ASTRAD_GRPC_HTTP2_KEEPALIVE_INTERVAL_MS:-15000}
   ASTRAD_GRPC_HTTP2_KEEPALIVE_TIMEOUT_MS: ${ASTRAD_GRPC_HTTP2_KEEPALIVE_TIMEOUT_MS:-5000}
@@ -127,12 +103,14 @@ x-astra-env: &astra-env
   ASTRAD_TENANT_VIRTUALIZATION_ENABLED: ${ASTRAD_TENANT_VIRTUALIZATION_ENABLED:-false}
 
 x-astra-base: &astra-base
-  build:
-    context: .
-    dockerfile: Dockerfile
+  image: ${ASTRA_IMAGE:?set ASTRA_IMAGE}
   environment: *astra-env
+  init: true
+  restart: unless-stopped
+  stop_grace_period: 60s
   security_opt:
     - seccomp:unconfined
+  oom_score_adj: ${ASTRA_OOM_SCORE_ADJ:--500}
   ulimits:
     nofile:
       soft: ${ASTRA_NOFILE_SOFT:-262144}
@@ -140,126 +118,46 @@ x-astra-base: &astra-base
   deploy:
     resources:
       limits:
-        memory: ${ASTRA_CONTAINER_MEMORY_LIMIT:-350M}
+        memory: ${ASTRA_CONTAINER_MEMORY_LIMIT:-2048M}
   expose:
     - "2380"
 
 services:
-  minio:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  minio-init:
-    image: minio/mc:latest
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint: >
-      /bin/sh -c "
-      mc alias set myminio http://minio:9000 minioadmin minioadmin &&
-      mc mb myminio/astra-tier --ignore-existing
-      "
-
   astra-node1:
     <<: *astra-base
     ports:
-      - "${PHASE6_ASTRA_NODE1_PORT:-2379}:2379"
-      - "${PHASE6_ASTRA_NODE1_METRICS_PORT:-19479}:9479"
+      - "127.0.0.1:52379:2379"
+      - "127.0.0.1:19479:9479"
     volumes:
-      - ${ASTRA_NODE1_DATA:-astra-node1-data}:/app/data
+      - ${ASTRA_NODE1_DATA:?set ASTRA_NODE1_DATA}:/app/data
     environment:
       <<: *astra-env
+      ASTRAD_CLIENT_ADDR: 0.0.0.0:2379
       ASTRAD_RAFT_ADVERTISE_ADDR: astra-node1:2380
     command: ["--node-id=1", "--peers=http://astra-node1:2380,http://astra-node2:2380,http://astra-node3:2380"]
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
 
   astra-node2:
     <<: *astra-base
     ports:
-      - "${PHASE6_ASTRA_NODE2_PORT:-32391}:2379"
-      - "${PHASE6_ASTRA_NODE2_METRICS_PORT:-19480}:9479"
+      - "127.0.0.1:52391:2379"
+      - "127.0.0.1:19480:9479"
     volumes:
-      - ${ASTRA_NODE2_DATA:-astra-node2-data}:/app/data
+      - ${ASTRA_NODE2_DATA:?set ASTRA_NODE2_DATA}:/app/data
     environment:
       <<: *astra-env
+      ASTRAD_CLIENT_ADDR: 0.0.0.0:2379
       ASTRAD_RAFT_ADVERTISE_ADDR: astra-node2:2380
     command: ["--node-id=2", "--peers=http://astra-node1:2380,http://astra-node2:2380,http://astra-node3:2380"]
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
 
   astra-node3:
     <<: *astra-base
     ports:
-      - "${PHASE6_ASTRA_NODE3_PORT:-32392}:2379"
-      - "${PHASE6_ASTRA_NODE3_METRICS_PORT:-19481}:9479"
+      - "127.0.0.1:52392:2379"
+      - "127.0.0.1:19481:9479"
     volumes:
-      - ${ASTRA_NODE3_DATA:-astra-node3-data}:/app/data
+      - ${ASTRA_NODE3_DATA:?set ASTRA_NODE3_DATA}:/app/data
     environment:
       <<: *astra-env
+      ASTRAD_CLIENT_ADDR: 0.0.0.0:2379
       ASTRAD_RAFT_ADVERTISE_ADDR: astra-node3:2380
     command: ["--node-id=3", "--peers=http://astra-node1:2380,http://astra-node2:2380,http://astra-node3:2380"]
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-
-  traffic-gen:
-    image: quay.io/coreos/etcd:v3.6.8
-    depends_on:
-      - astra-node1
-    entrypoint: /bin/sh -ec
-    command: |
-      while true; do
-        now=$$(date +%s%N)
-        etcdctl --dial-timeout=1s --command-timeout=2s --endpoints=http://astra-node1:2379 \
-          put /sandbox/heartbeat/$${now} "$${now}" >/dev/null 2>&1 || true
-        etcdctl --dial-timeout=1s --command-timeout=2s --endpoints=http://astra-node1:2379 \
-          get /sandbox/heartbeat/ --prefix --limit=1 >/dev/null 2>&1 || true
-        sleep 0.2
-      done
-
-  prometheus:
-    image: prom/prometheus:latest
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-    volumes:
-      - ./refs/sandbox/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "9090:9090"
-    depends_on:
-      - astra-node1
-      - astra-node2
-      - astra-node3
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-    volumes:
-      - ./refs/sandbox/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./refs/sandbox/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./refs/sandbox/grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro
-      - grafana-data:/var/lib/grafana
-    depends_on:
-      - prometheus
-
-volumes:
-  astra-node1-data:
-  astra-node2-data:
-  astra-node3-data:
-  prometheus-data:
-  grafana-data:

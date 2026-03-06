@@ -1,0 +1,17 @@
+x-s3-env: &s3-env
+  ASTRAD_S3_ENDPOINT: ${ASTRAD_S3_ENDPOINT:?set ASTRAD_S3_ENDPOINT}
+  ASTRAD_S3_BUCKET: ${ASTRAD_S3_BUCKET:?set ASTRAD_S3_BUCKET}
+  ASTRAD_S3_REGION: ${ASTRAD_S3_REGION:-auto}
+  ASTRAD_S3_PREFIX: ${ASTRAD_S3_PREFIX:-astra/live}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+
+services:
+  astra-node1:
+    environment: *s3-env
+
+  astra-node2:
+    environment: *s3-env
+
+  astra-node3:
+    environment: *s3-env

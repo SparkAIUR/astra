@@ -1,0 +1,38 @@
+groups:
+  - name: astra-single-node
+    rules:
+      - alert: AstraMetricsEndpointDown
+        expr: up{job="astra"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Astra metrics endpoint is unreachable
+          description: One of the Astra single-node metrics targets has been down for 2 minutes.
+
+      - alert: AstraPutQueueWaitP99High
+        expr: histogram_quantile(0.99, sum by (le, instance) (rate(astra_put_queue_wait_seconds_bucket[5m]))) > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Astra put queue wait p99 is high
+          description: Queue wait p99 has been above 250ms for 10 minutes on an Astra node.
+
+      - alert: AstraQuorumAckP99High
+        expr: histogram_quantile(0.99, sum by (le, instance) (rate(astra_put_quorum_ack_seconds_bucket[5m]))) > 0.35
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Astra quorum ack p99 is high
+          description: Quorum ack p99 has been above 350ms for 10 minutes on an Astra node.
+
+      - alert: AstraGatewaySingleflightWaiterTimeouts
+        expr: increase(astra_gateway_singleflight_waiter_timeouts_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Astra singleflight waiters are timing out
+          description: Read-path contention is causing singleflight waiters to time out.
