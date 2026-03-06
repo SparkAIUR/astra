@@ -6,7 +6,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "${SCRIPT_DIR}/phase12-common.sh"
 
 phase12_require_tools docker cargo ghz python3 etcdctl
-: "${ASTRA_IMAGE:?ASTRA_IMAGE is required, e.g. halceon/astra-alpha:phase12-<sha>}"
+: "${ASTRA_IMAGE:?ASTRA_IMAGE is required, e.g. halceon/astra:phase12-<sha>}"
 
 : "${PHASE12_TOMBSTONE_DURATION_SECS:=86400}"
 : "${PHASE12_TOMBSTONE_KEYS:=1000}"

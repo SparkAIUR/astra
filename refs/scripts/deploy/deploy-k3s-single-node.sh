@@ -58,7 +58,7 @@ Examples:
   deploy-k3s-single-node.sh --disk-device auto --validation full
   deploy-k3s-single-node.sh --disk-device auto --astra-container-memory-limit 2048M --validation full
   AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... deploy-k3s-single-node.sh --disk-device auto --backup-target external-s3 --s3-endpoint https://<account>.r2.cloudflarestorage.com --s3-bucket astra-prod --validation smoke
-  deploy-k3s-single-node.sh --astra-tag v0.1.0 --host-public-ip 162.209.124.74 --validation smoke
+  deploy-k3s-single-node.sh --astra-tag v0.1.1-rc1 --host-public-ip 162.209.124.74 --validation smoke
   deploy-k3s-single-node.sh --enable-servicelb --snapshotter overlayfs --validation smoke
   deploy-k3s-single-node.sh --host-public-ip 192.168.148.190 --tls-san 100.110.236.66 --node-name hplcpc01 --kubelet-arg fail-swap-on=false
 USAGE

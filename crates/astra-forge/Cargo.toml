@@ -12,8 +12,8 @@ categories = ["command-line-utilities", "database-implementations"]
 
 [dependencies]
 anyhow.workspace = true
-astra-core = { version = "0.1.0", path = "../astra-core" }
-astra-proto = { version = "0.1.0", path = "../astra-proto" }
+astra-core = { version = "0.1.1-rc1", path = "../astra-core" }
+astra-proto = { version = "0.1.1-rc1", path = "../astra-proto" }
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
 base64.workspace = true

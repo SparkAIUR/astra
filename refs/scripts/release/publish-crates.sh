@@ -8,10 +8,10 @@ Usage: publish-crates.sh [options]
 Publish Astra crates to crates.io in dependency order.
 
 Options:
-  --version <X.Y.Z>    Expected crate version (default: workspace version)
-  --dry-run            Run cargo publish --dry-run only
-  --skip-wait          Do not wait for crates.io index propagation between publishes
-  --help               Show help
+  --version <X.Y.Z[-rcN]>  Expected crate version (default: workspace version)
+  --dry-run                Run cargo publish --dry-run only
+  --skip-wait              Do not wait for crates.io index propagation between publishes
+  --help                   Show help
 USAGE
 }
 
@@ -36,7 +36,7 @@ if [ -z "${VERSION}" ]; then
   VERSION=$(awk -F'"' '/^version = /{print $2; exit}' "${REPO_ROOT}/Cargo.toml")
 fi
 
-if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
   echo "invalid version: ${VERSION}" >&2
   exit 1
 fi
@@ -99,7 +99,6 @@ for idx in "${!PACKAGES[@]}"; do
     cargo publish -p "${pkg}"
   fi
 
-  # Wait for dependency crates to propagate before publishing dependent crates.
   if [ "${DRY_RUN}" != "true" ] && [ "${SKIP_WAIT}" != "true" ] && [ "${idx}" -lt "$(( ${#PACKAGES[@]} - 1 ))" ]; then
     wait_for_crate "${pkg}" "${VERSION}" || true
   fi

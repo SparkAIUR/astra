@@ -17,7 +17,7 @@ spec:
       terminationGracePeriodSeconds: 120
       containers:
         - name: astrad
-          image: docker.io/halceon/astra-alpha
+          image: docker.io/halceon/astra:v0.1.1-rc1
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh

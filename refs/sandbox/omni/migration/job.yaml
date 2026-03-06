@@ -9,7 +9,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: importer
-          image: docker.io/halceon/astra-forge:latest
+          image: docker.io/halceon/astra-forge:v0.1.1-rc1
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh

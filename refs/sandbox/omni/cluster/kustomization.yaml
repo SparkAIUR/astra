@@ -12,5 +12,5 @@ resources:
   - astra-pdb.yaml
   - astra-statefulset.yaml
 images:
-  - name: docker.io/halceon/astra-alpha
-    newTag: latest
+  - name: docker.io/halceon/astra
+    newTag: v0.1.1-rc1

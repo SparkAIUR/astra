@@ -6,7 +6,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "${SCRIPT_DIR}/phase6-common.sh"
 
 phase6_require_tools docker ghz etcdctl python3
-: "${ASTRA_IMAGE:?ASTRA_IMAGE is required, e.g. halceon/astra-alpha:phase12-<sha>}"
+: "${ASTRA_IMAGE:?ASTRA_IMAGE is required, e.g. halceon/astra:phase12-<sha>}"
 
 : "${PHASE12_MR_TOTAL:=60000}"
 : "${PHASE12_MR_CONCURRENCY:=256}"
