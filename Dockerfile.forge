@@ -16,7 +16,7 @@ RUN if [ "$TARGETARCH" = "amd64" ]; then \
     fi && \
     cargo build --release -p astra-forge
 
-FROM quay.io/coreos/etcd:v3.6.8 AS etcdtools
+FROM quay.io/coreos/etcd:v3.6.9 AS etcdtools
 
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
