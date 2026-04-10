@@ -27,7 +27,7 @@ jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 jemallocator = "0.5.4"
 libc = "0.2.177"
 multiversion = "0.8.0"
-openraft = { version = "0.9.21", features = ["serde", "storage-v2"] }
+openraft = { version = "0.9.22", features = ["serde", "storage-v2"] }
 parking_lot = "0.12.5"
 prost = "0.14.3"
 reqwest = { version = "0.12.24", features = ["json", "rustls-tls"] }
